@@ -261,6 +261,10 @@ $bootstrapAutoInit = Join-Path $foundationInclude 'MddBootstrapAutoInitializer.c
 $bootstrapDll = Join-Path $foundationPkgDir.FullName 'runtimes\win-x64\native\Microsoft.WindowsAppRuntime.Bootstrap.dll'
 Write-Host "bootstrap: $($foundationPkgDir.Name) (framework-dependent)"
 
+# Resource compiler: embeds Assets\app.ico as the exe's icon resource, which is
+# what the task manager and the shell use for the executable.
+$rcExe = Join-Path $sdkRoot "bin\$sdkVersion\x64\rc.exe"
+
 if ($ListOnly) { return }
 
 if ($Clean -and (Test-Path $BuildDir)) {
@@ -508,7 +512,7 @@ $appSources = @(
     'ViewModels\PlayerViewModel.cpp', 'ViewModels\LibraryViewModel.cpp',
     'Services\AppPaths.cpp', 'Services\LibraryService.cpp',
     'Services\OnlineProviderService.cpp', 'Services\BuiltinProviders.cpp',
-    'Services\DiscoverSettings.cpp', 'Services\Services.cpp',
+    'Services\DiscoverSettings.cpp', 'Services\Services.cpp', 'Services\TrayIcon.cpp',
     'Controls\SpectrumView.cpp', 'Audio\WasapiLoopback.cpp',
     'Views\DiscoverPage.cpp', 'Views\LibraryPage.cpp',
     'Views\NowPlayingPage.cpp', 'Views\OnlinePage.cpp'
@@ -635,6 +639,8 @@ $edges = New-Object System.Text.StringBuilder
 [void]$edges.AppendLine('  command = cl.exe /nologo $in /Fe$out /link /SUBSYSTEM:CONSOLE')
 [void]$edges.AppendLine('rule linkapp')
 [void]$edges.AppendLine('  command = cl.exe /nologo $in /Fe$out /link /SUBSYSTEM:WINDOWS /LIBPATH:"' + $bootstrapLibDir + '" ' + $linkLibs)
+[void]$edges.AppendLine('rule rc')
+[void]$edges.AppendLine('  command = "' + $rcExe + '" /nologo /fo$out $in')
 [void]$edges.AppendLine()
 
 function ObjPath([string]$sourcePath) {
@@ -699,7 +705,17 @@ foreach ($full in $generatedSources) {
 }
 
 if (-not $NoLink) {
-    [void]$edges.AppendLine("build w-music.exe: linkapp $($appObjs -join ' ') $($coreObjs -join ' ')")
+    # The app icon resource (.ico embedded via rc.exe) feeds the task manager and
+    # the shell's icon for the exe; the runtime path uses the same .ico file.
+    $appRes = 'obj\w-music.res'
+    $appRc = Join-Path $SrcDir 'Assets\app.rc'
+    if (Test-Path $appRc) {
+        [void]$edges.AppendLine("build ${appRes}: rc $(NinjaPath $appRc)")
+    }
+    else {
+        $appRes = ''
+    }
+    [void]$edges.AppendLine("build w-music.exe: linkapp $($appObjs -join ' ') $appRes $($coreObjs -join ' ')")
     $defaults += 'w-music.exe'
 }
 [void]$edges.AppendLine("default $($defaults -join ' ')")
@@ -751,6 +767,14 @@ if (-not $NoLink) {
     $deployedDll = Join-Path $BuildDir 'Microsoft.WindowsAppRuntime.Bootstrap.dll'
     [IO.File]::Copy($bootstrapDll, $deployedDll, $true)
     Write-Host "runtime  : Microsoft.WindowsAppRuntime.Bootstrap.dll ($([math]::Round((Get-Item $deployedDll).Length/1KB)) KB) deployed next to the exe"
+
+    # Deploy the .ico beside the exe: AppWindow.SetIcon and the tray icon load it
+    # from that path at startup (an unpackaged app has no packaged assets to read).
+    $appIco = Join-Path $SrcDir 'Assets\app.ico'
+    if (Test-Path $appIco) {
+        [IO.File]::Copy($appIco, (Join-Path $BuildDir 'app.ico'), $true)
+        Write-Host "icon     : app.ico deployed next to the exe"
+    }
     # Reminder for the next person who adds a lib: anything that makes the exe
     # import a DLL from the *framework* payload needs that file deployed too.
     Write-Host '           framework package Microsoft.WindowsAppRuntime.2 2.3.1.0 must be registered;'

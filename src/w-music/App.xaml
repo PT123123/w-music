@@ -8,12 +8,140 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- ===== QQ 音乐风格的全局形状 ===== -->
+            <Style TargetType="Button">
+                <Setter Property="CornerRadius" Value="16" />
+            </Style>
+            <Style TargetType="ToggleButton">
+                <Setter Property="CornerRadius" Value="16" />
+            </Style>
+            <Style TargetType="NavigationViewItem">
+                <Setter Property="Margin" Value="10,2" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+            <Style x:Key="QqAccentButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="CornerRadius" Value="16" />
+            </Style>
+            <Style x:Key="QqSectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="20" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style x:Key="QqCardContainerStyle" TargetType="GridViewItem">
+                <Setter Property="Margin" Value="3" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="QqTrackContainerStyle" TargetType="ListViewItem">
+                <Setter Property="Margin" Value="4,1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+
+            <!-- 顶部横幅渐变（发现页） -->
+            <LinearGradientBrush x:Key="WmAccentGradientBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Offset="0" Color="#FF3CCE92" />
+                <GradientStop Offset="1" Color="#FF17A05E" />
+            </LinearGradientBrush>
+
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
+                    <!-- 品牌绿 -->
                     <SolidColorBrush x:Key="WmAccentBrush" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="WmAccentSoftBrush" Color="#FFE3F7EF" />
+                    <SolidColorBrush x:Key="WmBgBrush" Color="#FFF7F7F7" />
+                    <SolidColorBrush x:Key="WmSideBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="WmCardBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="WmSecondaryBrush" Color="#FF8C8C8C" />
+                    <SolidColorBrush x:Key="WmHoverBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="WmPressBrush" Color="#22000000" />
+                    <SolidColorBrush x:Key="WmChipBrush" Color="#FFECECEC" />
+                    <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="#FFFFFFFF" />
+
+                    <!-- 按钮：无边框圆角，hover 浅灰（QQ 音乐式） -->
+                    <SolidColorBrush x:Key="ButtonBackground" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#12000000" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#22000000" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#00FFFFFF" />
+
+                    <!-- 强调按钮（AccentButtonStyle）变绿 -->
+                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFFFF" />
+
+                    <!-- ToggleButton（源切换）：选中绿色胶囊 -->
+                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#FFEFEFEF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#FFE4E4E4" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#00FFFFFF" />
+
+                    <!-- 导航项：选中浅绿背景 + 绿字 -->
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#FFE3F7EF" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundPointerOver" Color="#12000000" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundPointerOver" Color="#FF333333" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#FFE3F7EF" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#FF31C27C" />
+
+                    <!-- 滑块：绿色进度 -->
+                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FF28B06E" />
                 </ResourceDictionary>
+
                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="WmAccentBrush" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="WmAccentSoftBrush" Color="#2E31C27C" />
+                    <SolidColorBrush x:Key="WmBgBrush" Color="#FF151515" />
+                    <SolidColorBrush x:Key="WmSideBrush" Color="#FF1D1D1D" />
+                    <SolidColorBrush x:Key="WmCardBrush" Color="#FF262626" />
+                    <SolidColorBrush x:Key="WmSecondaryBrush" Color="#FF8F8F8F" />
+                    <SolidColorBrush x:Key="WmHoverBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="WmPressBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="WmChipBrush" Color="#FF2E2E2E" />
+                    <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="#FF1D1D1D" />
+
+                    <SolidColorBrush x:Key="ButtonBackground" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#00FFFFFF" />
+
+                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFFFF" />
+
+                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="#FF2A2A2A" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#FF343434" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#FF3C3C3C" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#00FFFFFF" />
+
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#2E31C27C" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundPointerOver" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#2E31C27C" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#FF3FD48A" />
+
+                    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FF28B06E" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

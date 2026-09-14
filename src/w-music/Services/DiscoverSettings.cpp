@@ -80,6 +80,14 @@ namespace wm::app
         {
             m_net24BaseUrl = Utf16(url->asString());
         }
+        if (auto const* cookie = root->Find("qqSessionCookie"); cookie != nullptr && cookie->isString())
+        {
+            m_qqSessionCookie = Utf16(cookie->asString());
+        }
+        if (auto const* uin = root->Find("qqUin"); uin != nullptr && uin->isString())
+        {
+            m_qqUin = Utf16(uin->asString());
+        }
     }
 
     void DiscoverSettings::Save() const
@@ -94,6 +102,8 @@ namespace wm::app
         }
         root["searchHistory"] = wm::core::json::Value{ std::move(history) };
         root["net24BaseUrl"] = wm::core::json::Value{ Utf8(m_net24BaseUrl) };
+        root["qqSessionCookie"] = wm::core::json::Value{ Utf8(m_qqSessionCookie) };
+        root["qqUin"] = wm::core::json::Value{ Utf8(m_qqUin) };
 
         WriteFile(SettingsFilePath(), wm::core::json::Serialize(wm::core::json::Value{ std::move(root) }, true));
     }
@@ -172,6 +182,28 @@ namespace wm::app
             return;
         }
         m_net24BaseUrl = value;
+        Save();
+    }
+
+    void DiscoverSettings::SetQqSession(std::wstring const& cookie, std::wstring const& uin)
+    {
+        if (m_qqSessionCookie == cookie && m_qqUin == uin)
+        {
+            return;
+        }
+        m_qqSessionCookie = cookie;
+        m_qqUin = uin;
+        Save();
+    }
+
+    void DiscoverSettings::ClearQqSession()
+    {
+        if (m_qqSessionCookie.empty() && m_qqUin.empty())
+        {
+            return;
+        }
+        m_qqSessionCookie.clear();
+        m_qqUin.clear();
         Save();
     }
 

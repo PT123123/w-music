@@ -29,6 +29,8 @@ namespace winrt::w_music::implementation
                            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnQqSearchClick(winrt::Windows::Foundation::IInspectable const& sender,
                              winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnQqLoginClick(winrt::Windows::Foundation::IInspectable const& sender,
+                            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnQqResultClick(winrt::Windows::Foundation::IInspectable const& sender,
                              winrt::Microsoft::UI::Xaml::Controls::ItemClickEventArgs const& args);
         void OnQqDownloadClick(winrt::Windows::Foundation::IInspectable const& sender,
@@ -80,6 +82,12 @@ namespace winrt::w_music::implementation
         winrt::fire_and_forget RunQqPreview(winrt::w_music::OnlineTrackItem item);
         winrt::fire_and_forget RunQqDownload(winrt::w_music::OnlineTrackItem item,
                                              winrt::Microsoft::UI::Xaml::Controls::Button downloadButton);
+        void RefreshQqLoginUi();
+        winrt::fire_and_forget RunQqLoginDialog();
+        winrt::fire_and_forget PollQqLogin(winrt::Microsoft::UI::Xaml::Controls::ContentDialog dialog,
+                                           wm::core::QqLoginFlow flow,
+                                           wm::core::QqLoginContext context,
+                                           winrt::Microsoft::UI::Xaml::Controls::TextBlock status);
 
         // ---- 无损站 (replica of a-music's Net24Section) ----
         void Net24Submit(hstring const& word);

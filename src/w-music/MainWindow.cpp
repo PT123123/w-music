@@ -17,6 +17,22 @@ using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Controls::Primitives;
 
+namespace
+{
+    // The window/tray icons are loaded from app.ico, which the build deploys
+    // next to the exe (an unpackaged app has no packaged assets to read).
+    std::filesystem::path ExeDirectory()
+    {
+        wchar_t buffer[MAX_PATH]{};
+        const DWORD written = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (written == 0 || written >= MAX_PATH)
+        {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path{ buffer }.parent_path();
+    }
+} // namespace
+
 namespace winrt::w_music::implementation
 {
     MainWindow::MainWindow()
@@ -76,6 +92,28 @@ namespace winrt::w_music::implementation
 
         // Kick off the WASAPI loopback capture for the spectrum.
         winrt::get_self<implementation::PlayerViewModel>(wm::app::Player())->StartSpectrum();
+
+        // Window icon (taskbar / alt-tab) and the system-tray icon, both from
+        // the green-note app.ico deployed next to the exe.
+        const auto iconPath = (ExeDirectory() / L"app.ico").wstring();
+        try
+        {
+            AppWindow().SetIcon(hstring{ iconPath });
+        }
+        catch (...)
+        {
+            // Icon is cosmetic; never fail startup over it.
+        }
+        const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(AppWindow().Id());
+        if (m_trayIcon.Initialize(hwnd, iconPath))
+        {
+            Closed({ this, &MainWindow::OnWindowClosed });
+        }
+    }
+
+    void MainWindow::OnWindowClosed(Windows::Foundation::IInspectable const&, WindowEventArgs const&)
+    {
+        m_trayIcon.Destroy();
     }
 
     void MainWindow::NavigateTo(hstring const& tag)

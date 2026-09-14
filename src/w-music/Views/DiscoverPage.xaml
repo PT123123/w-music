@@ -7,143 +7,231 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <ScrollViewer>
-        <StackPanel Padding="28,20,28,28" Spacing="22">
+    <Grid Background="{ThemeResource WmBgBrush}">
+        <ScrollViewer>
+            <StackPanel Padding="28,20,28,28" Spacing="24">
 
-            <!-- ===== header ===== -->
-            <Border CornerRadius="10"
-                    Padding="26"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="发现音乐" FontSize="26" FontWeight="SemiBold" />
-                    <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
-                               FontSize="13"
-                               Opacity="0.75"
-                               TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
-                        <Button x:Name="AddFolderButton" Content="添加音乐文件夹" />
-                        <Button x:Name="RescanButton" Content="重新扫描" />
-                        <Button x:Name="PlayAllButton" Content="播放全部" />
-                        <ProgressRing x:Name="ScanRing"
-                                      Width="18" Height="18"
-                                      IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}" />
+                <!-- ===== 顶部横幅（QQ 音乐风格） ===== -->
+                <Border CornerRadius="14"
+                        Padding="28,24"
+                        Background="{ThemeResource WmAccentGradientBrush}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="发现音乐"
+                                   FontSize="30"
+                                   FontWeight="Bold"
+                                   Foreground="White" />
+                        <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                                   FontSize="13"
+                                   Foreground="#E6FFFFFF"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,10,0,0">
+                            <Button x:Name="AddFolderButton" Content="添加音乐文件夹"
+                                    Background="White" Foreground="{ThemeResource WmAccentBrush}"
+                                    FontWeight="SemiBold" Padding="18,8" />
+                            <Button x:Name="RescanButton" Content="重新扫描"
+                                    Foreground="White" Padding="14,8" />
+                            <Button x:Name="PlayAllButton" Content="播放全部"
+                                    Foreground="White" Padding="14,8" />
+                            <ProgressRing x:Name="ScanRing"
+                                          Width="18" Height="18"
+                                          Foreground="White"
+                                          IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
+                                          VerticalAlignment="Center" />
+                        </StackPanel>
+                        <AutoSuggestBox x:Name="SearchBox"
+                                        PlaceholderText="在本地曲库中搜索：标题 / 艺术家 / 专辑"
+                                        QueryIcon="Find"
+                                        MaxWidth="520"
+                                        HorizontalAlignment="Left"
+                                        Background="#F2FFFFFF"
+                                        Margin="0,10,0,0" />
                     </StackPanel>
-                    <AutoSuggestBox x:Name="SearchBox"
-                                    PlaceholderText="在本地曲库中搜索：标题 / 艺术家 / 专辑"
-                                    QueryIcon="Find"
-                                    MaxWidth="520"
-                                    HorizontalAlignment="Left"
-                                    Margin="0,8,0,0" />
+                </Border>
+
+                <!-- ===== 搜索结果显示区 ===== -->
+                <StackPanel x:Name="SearchPanel" Visibility="Collapsed" Spacing="12">
+                    <TextBlock Text="搜索结果" FontSize="20" FontWeight="SemiBold" />
+                    <GridView x:Name="SearchList"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True"
+                              ItemContainerStyle="{StaticResource QqCardContainerStyle}">
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="local:TrackItem">
+                                <Grid Width="148" Margin="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" CornerRadius="10"
+                                            Background="{ThemeResource WmCardBrush}"
+                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderThickness="1">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                    Width="30" Height="30" CornerRadius="15" Margin="0,0,8,8"
+                                                    Background="{ThemeResource WmAccentBrush}">
+                                                <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="White"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" Margin="2,8,2,0" />
+                                    <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.6"
+                                               TextTrimming="CharacterEllipsis" Margin="2,2,2,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                    </GridView>
                 </StackPanel>
-            </Border>
 
-            <!-- ===== search results (shown only while searching) ===== -->
-            <StackPanel x:Name="SearchPanel" Visibility="Collapsed" Spacing="10">
-                <TextBlock Text="搜索结果" FontSize="18" FontWeight="SemiBold" />
-                <GridView x:Name="SearchList"
-                          SelectionMode="None"
-                          IsItemClickEnabled="True">
-                    <GridView.ItemTemplate>
-                        <DataTemplate x:DataType="local:TrackItem">
-                            <Grid Width="150" Height="170" Padding="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="6" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                    <FontIcon Glyph="&#xEC4F;" FontSize="26" Foreground="{ThemeResource WmAccentBrush}" />
-                                </Border>
-                                <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,8,0,0" />
-                                <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
-                            </Grid>
-                        </DataTemplate>
-                    </GridView.ItemTemplate>
-                </GridView>
+                <!-- ===== 每日推荐 ===== -->
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock Text="每日推荐" Style="{StaticResource QqSectionTitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                            <TextBlock Text="更多" FontSize="13" Opacity="0.55" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE76C;" FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                    <GridView x:Name="ShuffleList"
+                              ItemsSource="{x:Bind ViewModel.DiscoverShuffle, Mode=OneWay}"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True"
+                              ItemContainerStyle="{StaticResource QqCardContainerStyle}">
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="local:TrackItem">
+                                <Grid Width="148" Margin="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" CornerRadius="10"
+                                            Background="{ThemeResource WmCardBrush}"
+                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderThickness="1">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                    Width="30" Height="30" CornerRadius="15" Margin="0,0,8,8"
+                                                    Background="{ThemeResource WmAccentBrush}">
+                                                <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="White"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" Margin="2,8,2,0" />
+                                    <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.6"
+                                               TextTrimming="CharacterEllipsis" Margin="2,2,2,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                    </GridView>
+                </StackPanel>
+
+                <!-- ===== 最近添加 ===== -->
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock Text="最近添加" Style="{StaticResource QqSectionTitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                            <TextBlock Text="更多" FontSize="13" Opacity="0.55" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE76C;" FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                    <GridView x:Name="RecentList"
+                              ItemsSource="{x:Bind ViewModel.DiscoverRecent, Mode=OneWay}"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True"
+                              ItemContainerStyle="{StaticResource QqCardContainerStyle}">
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="local:TrackItem">
+                                <Grid Width="148" Margin="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" CornerRadius="10"
+                                            Background="{ThemeResource WmCardBrush}"
+                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderThickness="1">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                    Width="30" Height="30" CornerRadius="15" Margin="0,0,8,8"
+                                                    Background="{ThemeResource WmAccentBrush}">
+                                                <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="White"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" Margin="2,8,2,0" />
+                                    <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.6"
+                                               TextTrimming="CharacterEllipsis" Margin="2,2,2,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                    </GridView>
+                </StackPanel>
+
+                <!-- ===== 常听 ===== -->
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock Text="常听" Style="{StaticResource QqSectionTitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+                            <TextBlock Text="更多" FontSize="13" Opacity="0.55" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE76C;" FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                    <GridView x:Name="TopList"
+                              ItemsSource="{x:Bind ViewModel.DiscoverTop, Mode=OneWay}"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True"
+                              ItemContainerStyle="{StaticResource QqCardContainerStyle}">
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="local:TrackItem">
+                                <Grid Width="148" Margin="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" CornerRadius="10"
+                                            Background="{ThemeResource WmCardBrush}"
+                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderThickness="1">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                    Width="30" Height="30" CornerRadius="15" Margin="0,0,8,8"
+                                                    Background="{ThemeResource WmAccentBrush}">
+                                                <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="White"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" Margin="2,8,2,0" />
+                                    <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.6"
+                                               TextTrimming="CharacterEllipsis" Margin="2,2,2,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                    </GridView>
+                </StackPanel>
+
+                <TextBlock FontSize="12" Opacity="0.55" TextWrapping="Wrap"
+                           Text="想找新歌？左侧「在线发现」标签页可以从在线源搜索并直接下载到本地曲库。" />
             </StackPanel>
-
-            <!-- ===== daily recommendation ===== -->
-            <StackPanel Spacing="10">
-                <TextBlock Text="每日推荐" FontSize="18" FontWeight="SemiBold" />
-                <GridView x:Name="ShuffleList"
-                          ItemsSource="{x:Bind ViewModel.DiscoverShuffle, Mode=OneWay}"
-                          SelectionMode="None"
-                          IsItemClickEnabled="True">
-                    <GridView.ItemTemplate>
-                        <DataTemplate x:DataType="local:TrackItem">
-                            <Grid Width="150" Height="170" Padding="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="6" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                    <FontIcon Glyph="&#xEC4F;" FontSize="26" Foreground="{ThemeResource WmAccentBrush}" />
-                                </Border>
-                                <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,8,0,0" />
-                                <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
-                            </Grid>
-                        </DataTemplate>
-                    </GridView.ItemTemplate>
-                </GridView>
-            </StackPanel>
-
-            <!-- ===== recently added ===== -->
-            <StackPanel Spacing="10">
-                <TextBlock Text="最近添加" FontSize="18" FontWeight="SemiBold" />
-                <GridView x:Name="RecentList"
-                          ItemsSource="{x:Bind ViewModel.DiscoverRecent, Mode=OneWay}"
-                          SelectionMode="None"
-                          IsItemClickEnabled="True">
-                    <GridView.ItemTemplate>
-                        <DataTemplate x:DataType="local:TrackItem">
-                            <Grid Width="150" Height="170" Padding="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="6" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                    <FontIcon Glyph="&#xEC4F;" FontSize="26" Foreground="{ThemeResource WmAccentBrush}" />
-                                </Border>
-                                <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,8,0,0" />
-                                <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
-                            </Grid>
-                        </DataTemplate>
-                    </GridView.ItemTemplate>
-                </GridView>
-            </StackPanel>
-
-            <!-- ===== most played ===== -->
-            <StackPanel Spacing="10">
-                <TextBlock Text="常听" FontSize="18" FontWeight="SemiBold" />
-                <GridView x:Name="TopList"
-                          ItemsSource="{x:Bind ViewModel.DiscoverTop, Mode=OneWay}"
-                          SelectionMode="None"
-                          IsItemClickEnabled="True">
-                    <GridView.ItemTemplate>
-                        <DataTemplate x:DataType="local:TrackItem">
-                            <Grid Width="150" Height="170" Padding="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Border Grid.Row="0" CornerRadius="6" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                    <FontIcon Glyph="&#xEC4F;" FontSize="26" Foreground="{ThemeResource WmAccentBrush}" />
-                                </Border>
-                                <TextBlock Grid.Row="1" Text="{x:Bind Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,8,0,0" />
-                                <TextBlock Grid.Row="2" Text="{x:Bind Artist}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
-                            </Grid>
-                        </DataTemplate>
-                    </GridView.ItemTemplate>
-                </GridView>
-            </StackPanel>
-
-            <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap"
-                       Text="想找新歌？左侧「在线发现」标签页可以从在线源搜索并直接下载到本地曲库。" />
-        </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </Grid>
 </Page>

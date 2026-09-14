@@ -1,0 +1,4 @@
+// w-music application icon resource.
+// Compiled by rc.exe into obj\w-music.res and linked into w-music.exe so the
+// task manager and the shell show the app icon for the executable.
+IDI_APP_ICON ICON "app.ico"

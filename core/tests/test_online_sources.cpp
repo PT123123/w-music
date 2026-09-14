@@ -196,6 +196,126 @@ int main()
     }
 
     // ===================================================================
+    // == QQ 音乐: lyrics + login session                               ==
+    // ===================================================================
+    {
+        FakeSite site;
+        QqSource source{ [&](HttpRequest const& r) { return site(r); } };
+
+        // Lyric endpoint shape + payload decoding (nobase64=1 => plain LRC).
+        site.canned["https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+                    "?songmid=002bBHWB3zLk1T&g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&nobase64=1"] =
+            { 200, R"JSON({"retcode":0,"lyric":"[00:00.00]稻香"})JSON", {} };
+        CHECK(source.Lyric("002bBHWB3zLk1T") == "[00:00.00]稻香");
+        CHECK(site.log.front().headers.at("Referer") == "https://y.qq.com/");
+
+        // Missing lyric -> empty, no throw.
+        site.canned["https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+                    "?songmid=nolyric&g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&nobase64=1"] =
+            { 200, R"JSON({"retcode":0,"lyric":""})JSON", {} };
+        CHECK(source.Lyric("nolyric").empty());
+        CHECK(source.Lyric("").empty());
+
+        // Installed session cookie is forwarded on every request.
+        site.canned.clear();
+        site.log.clear();
+        source.SetSession("uin=o12345; p_skey=abc; qrsig=xyz", "12345");
+        site.prefixCanned.push_back({ "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg",
+                                      { 200, R"JSON({"retcode":0,"lyric":"x"})JSON", {} } });
+        CHECK(source.Lyric("002bBHWB3zLk1T") == "x");
+        CHECK_CONTAINS(site.log.back().headers.at("Cookie"), "uin=o12345; p_skey=abc; qrsig=xyz");
+        CHECK(source.Uin() == "12345");
+    }
+
+    // ===================================================================
+    // == QQ 音乐: 扫码登录流程                                         ==
+    // ===================================================================
+    {
+        // hash33 matches the known web player vectors.
+        CHECK(QqLoginFlow::Hash33("") == "0");
+        CHECK(QqLoginFlow::Hash33("qrsigtest") == std::to_string([] {
+            std::int64_t n = 0;
+            for (unsigned char const c : std::string("qrsigtest"))
+            {
+                n = ((n << 5) + n + c) & 0x7FFFFFFF;
+            }
+            return n;
+        }()));
+        // A value that overflows 32-bit accumulation several times.
+        CHECK(QqLoginFlow::Hash33("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") ==
+              std::to_string([] {
+                  std::int64_t n = 0;
+                  for (unsigned char const c : std::string("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+                  {
+                      n = ((n << 5) + n + c) & 0x7FFFFFFF;
+                  }
+                  return n;
+              }()));
+
+        FakeSite site;
+        QqLoginFlow flow{ [&](HttpRequest const& r) { return site(r); } };
+
+        // FetchQr: QR body + qrsig from Set-Cookie, even when multiple
+        // Set-Cookie values are folded into one header with newlines.
+        HttpResponse qr;
+        qr.status = 200;
+        qr.body = "JPG_BYTES_0123456789";
+        qr.headers["Set-Cookie"] = "qrsig=abc123; Path=/; HttpOnly\nuin=o0; Path=/";
+        site.canned["https://ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&e=2&l=M&s=3&d=72&v=4&t=0.1&daid=383&pt_3rd_aid=100497308&u1=https%3A%2F%2Fy.qq.com%2Fportal%2Fwplayer.html"] = qr;
+
+        auto const ctx = flow.FetchQr();
+        CHECK(ctx.ok);
+        CHECK(ctx.qrImage == "JPG_BYTES_0123456789");
+        CHECK(ctx.qrsig == "abc123");
+        CHECK(ctx.ptqrtoken == QqLoginFlow::Hash33("abc123"));
+
+        // CheckStatus 65 -> Waiting.
+        HttpResponse waiting;
+        waiting.status = 200;
+        waiting.body = "ptuiCB('65','0','https://ssl.ptlogin2.qq.com/check',0,'二维码未失效','',0,0,0);";
+        site.prefixCanned.push_back({ "https://ssl.ptlogin2.qq.com/ptqrlogin?u1=", waiting });
+        auto const w = flow.CheckStatus(ctx);
+        CHECK(w.status == QqLoginStatus::Waiting);
+        CHECK(w.cookie.empty());
+
+        // CheckStatus 66 -> Scanned.
+        site.prefixCanned.front().second.body =
+            "ptuiCB('66','0','https://ssl.ptlogin2.qq.com/check',0,'二维码认证中','',0,0,0);";
+        CHECK(flow.CheckStatus(ctx).status == QqLoginStatus::Scanned);
+
+        // CheckStatus 0 -> Success with the accumulated login cookies.
+        HttpResponse ok;
+        ok.status = 200;
+        ok.body = "ptuiCB('0','12345','https://ssl.ptlogin2.qq.com/check',0,'登录成功！','周杰伦',0,0,0);";
+        ok.headers["Set-Cookie"] =
+            "p_skey=PSKEY123; Path=/; HttpOnly\nuin=o12345; Path=/\nskey=@SKKEY456; Path=/";
+        site.prefixCanned.front().second = ok;
+        auto const okResult = flow.CheckStatus(ctx);
+        CHECK(okResult.status == QqLoginStatus::Success);
+        CHECK(okResult.uin == "12345");
+        CHECK_CONTAINS(okResult.cookie, "p_skey=PSKEY123");
+        CHECK_CONTAINS(okResult.cookie, "uin=o12345");
+        CHECK_CONTAINS(okResult.cookie, "skey=@SKKEY456");
+
+        // The polling request itself carries qrsig back.
+        auto const pollUrl = site.log.back().url;
+        CHECK_CONTAINS(pollUrl, "ptqrtoken=" + ctx.ptqrtoken);
+        CHECK_CONTAINS(pollUrl, "qrsig=abc123");
+
+        // 67 -> Failed with the expiry message.
+        site.prefixCanned.front().second.body = "ptuiCB('67','0','','','二维码已失效','',0,0,0);";
+        auto const expired = flow.CheckStatus(ctx);
+        CHECK(expired.status == QqLoginStatus::Failed);
+        CHECK_CONTAINS(expired.reason, "过期");
+
+        // Unparseable / missing context never throws.
+        site.prefixCanned.front().second.body = "garbage";
+        CHECK(flow.CheckStatus(ctx).status == QqLoginStatus::Failed);
+        QqLoginContext empty;
+        CHECK(flow.CheckStatus(empty).status == QqLoginStatus::Failed);
+    }
+
+    // ===================================================================
     // == 无损站: search + catalogue merge                              ==
     // ===================================================================
     {
