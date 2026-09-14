@@ -229,9 +229,37 @@ $foundationPkgDir = Newest-PackageDir 'microsoft.windowsappsdk.foundation'
 if (-not $foundationPkgDir) { throw 'microsoft.windowsappsdk.foundation NuGet package not restored.' }
 $foundationInclude = Join-Path $foundationPkgDir.FullName 'include'
 $bootstrapLibDir = Join-Path $foundationPkgDir.FullName 'lib\native\x64'
+# An unpackaged app reaches the WindowsAppSDK runtime through one of two
+# mutually exclusive models, picked by preprocessor macros inside
+# WindowsAppRuntimeAutoInitializer.cpp. That file is the dispatcher: it declares
+# the init_seg(lib) static object whose constructor is what actually calls
+# Initialize(), so it must always be on the compile list.
+#
+#   MICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP  (this build)
+#       Framework-dependent: MddBootstrapInitialize2() adds the installed
+#       framework package to the process. Requires
+#       Microsoft.WindowsAppRuntime.Bootstrap.dll next to the exe, and pulls in
+#       no import of Microsoft.WindowsAppRuntime.dll.
+#   MICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_UNDOCKEDREGFREEWINRT
+#       Self-contained: imports Microsoft.WindowsAppRuntime.dll directly (the
+#       initializer exists purely to create that import), so the whole
+#       runtimes-framework payload has to be deployed beside the exe.
+#
+# A real MSBuild build defaults to the first, and the 2.3.1.0 framework package
+# is already registered on this machine, so take that one.
+#
+# Bug this replaces: an earlier revision compiled *both* initializer .cpp files
+# and never the dispatcher. Nothing then called Initialize() -- so no bootstrap
+# ever happened -- while each initializer still dragged its own DLL into the
+# import table. The symptom was a load-time "找不到
+# Microsoft.WindowsAppRuntime.Bootstrap.dll" (the file exists only in the NuGet
+# package, not on any search path) masking the real defect.
+$bootstrapDispatcher = Join-Path $foundationInclude 'WindowsAppRuntimeAutoInitializer.cpp'
 $bootstrapAutoInit = Join-Path $foundationInclude 'MddBootstrapAutoInitializer.cpp'
-$undockedAutoInit = Join-Path $foundationInclude 'UndockedRegFreeWinRT-AutoInitializer.cpp'
-Write-Host "bootstrap: $($foundationPkgDir.Name)"
+# LoadLibrary'd by the bootstrapper at startup, so it must be deployed next to
+# the exe; see the copy step in the build report.
+$bootstrapDll = Join-Path $foundationPkgDir.FullName 'runtimes\win-x64\native\Microsoft.WindowsAppRuntime.Bootstrap.dll'
+Write-Host "bootstrap: $($foundationPkgDir.Name) (framework-dependent)"
 
 if ($ListOnly) { return }
 
@@ -551,8 +579,11 @@ $generatedSources = @(
     # its own TU. Omitting it links and then fails with ~22 unresolved
     # winrt::w_music::implementation::Xaml* symbols.
     (Join-Path $genComponent 'w_music\XamlTypeInfo.Impl.g.cpp'),
-    $bootstrapAutoInit,
-    $undockedAutoInit
+    # The runtime bootstrapper (see the bootstrap note near $bootstrapDispatcher).
+    # Both files are required: the dispatcher owns the static object that runs
+    # initialization, the second one implements it.
+    $bootstrapDispatcher,
+    $bootstrapAutoInit
 )
 foreach ($gs in $generatedSources) {
     if ($gs -notmatch '\.(cpp|cxx|cc|c)$') {
@@ -573,11 +604,18 @@ $sdkIncludes = @('um', 'shared', 'ucrt', 'cppwinrt', 'winrt') |
     ForEach-Object { "/I`"$sdkInc\$_`"" }
 $wasdkIncludes = $wasdkIncludeDirs | ForEach-Object { "/I`"$_`"" }
 $includes = ($relIncludes + $wasdkIncludes + $sdkIncludes) -join ' '
-$cppFlags = '/std:c++20 /EHsc /utf-8 /bigobj /W3 /permissive- /D_UNICODE /DUNICODE /DWINRT_LEAN_AND_MEAN /D_VSDESIGNER_DONT_LOAD_AS_DLL'
-# Microsoft.WindowsAppRuntime.lib is needed for WindowsAppRuntime_EnsureIsLoaded,
-# which UndockedRegFreeWinRT-AutoInitializer.cpp calls. MddBootstrap*.lib (the
-# bootstrapper) and WindowsAppRuntime*.lib (the framework) are separate imports.
-$linkLibs = @('windowsapp.lib', 'Microsoft.WindowsAppRuntime.lib',
+# MICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP selects the framework-dependent
+# branch in WindowsAppRuntimeAutoInitializer.cpp; the bootstrap auto-initializer
+# itself also keys off it (see WindowsAppSDK-Nuget-Native.Bootstrap.targets).
+$cppFlags = '/std:c++20 /EHsc /utf-8 /bigobj /W3 /permissive- /D_UNICODE /DUNICODE /DWINRT_LEAN_AND_MEAN /D_VSDESIGNER_DONT_LOAD_AS_DLL /DMICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP=1'
+# Microsoft.WindowsAppRuntime.Bootstrap.lib supplies MddBootstrapInitialize2 /
+# MddBootstrapShutdown and is what makes the exe import the bootstrapper DLL.
+# Nothing here needs Microsoft.WindowsAppRuntime.lib -- that one belongs to the
+# self-contained model, where UndockedRegFreeWinRT-AutoInitializer.cpp calls
+# WindowsAppRuntime_EnsureIsLoaded(). Linking it anyway (as an earlier revision
+# did) adds a hard load-time import of the framework DLL, which the OS cannot
+# resolve before the bootstrapper has run.
+$linkLibs = @('windowsapp.lib',
               'Microsoft.WindowsAppRuntime.Bootstrap.lib',
               'ole32.lib', 'oleaut32.lib', 'uuid.lib', 'runtimeobject.lib',
               'shell32.lib', 'shlwapi.lib', 'propsys.lib', 'user32.lib',
@@ -703,9 +741,55 @@ if (-not $NoLink) {
     else {
         Write-Host 'exe      : not produced' -ForegroundColor Yellow
     }
-}
-foreach ($f in (Get-ChildItem $xamlDir -Filter '*.xbf' -ErrorAction SilentlyContinue)) {
-    Write-Host "  xbf    : $($f.Name) ($([math]::Round($f.Length/1KB)) KB)"
+
+    # The exe imports Microsoft.WindowsAppRuntime.Bootstrap.dll, and Windows only
+    # searches the app directory and the standard system paths -- never the NuGet
+    # cache. Without this copy the process dies before any of our code runs with
+    # "找不到 Microsoft.WindowsAppRuntime.Bootstrap.dll". MSBuild does the same
+    # thing in WindowsAppSDK-Nuget-Native.Bootstrap.targets.
+    if (-not (Test-Path $bootstrapDll)) { throw "bootstrapper DLL not found: $bootstrapDll" }
+    $deployedDll = Join-Path $BuildDir 'Microsoft.WindowsAppRuntime.Bootstrap.dll'
+    [IO.File]::Copy($bootstrapDll, $deployedDll, $true)
+    Write-Host "runtime  : Microsoft.WindowsAppRuntime.Bootstrap.dll ($([math]::Round((Get-Item $deployedDll).Length/1KB)) KB) deployed next to the exe"
+    # Reminder for the next person who adds a lib: anything that makes the exe
+    # import a DLL from the *framework* payload needs that file deployed too.
+    Write-Host '           framework package Microsoft.WindowsAppRuntime.2 2.3.1.0 must be registered;'
+    Write-Host '           the bootstrapper exits with a message box if no match is found.'
+
+    # XAML markup deployment. Every generated InitializeComponent() does
+    #     LoadComponent(*this, Uri{ L"ms-appx:///<Folder>/<Name>.xaml" })
+    # and for an unpackaged app ms-appx:/// maps to the directory holding the
+    # exe -- the same rule the framework itself relies on for its own
+    # Microsoft.UI.Xaml\Assets\* files. So <Name>.xbf has to sit in
+    # <build>\<Folder>\, not in the compiler's staging directory.
+    #
+    # The folder name comes from the generated URIs rather than being hardcoded,
+    # so this cannot drift if the root namespace ever changes. MSBuild's
+    # equivalent is the CopyGeneratedXaml target, which instead derives the
+    # destination from the XAML item's path relative to ProjectDir -- the two
+    # agree only for projects whose XAML sits at the project root, which is why
+    # this build cannot reuse that rule.
+    $xbfDeployed = @{}
+    foreach ($header in (Get-ChildItem $genComponent -Recurse -Filter '*.xaml.g.h*')) {
+        $uriMatches = [regex]::Matches((Get-Content $header.FullName -Raw), 'ms-appx:///(?<p>[^"]+?)\.xaml')
+        foreach ($m in $uriMatches) {
+            $rel = $m.Groups['p'].Value -replace '/', '\'
+            if ($xbfDeployed.ContainsKey($rel)) { continue }
+            $source = Join-Path $xamlDir (([IO.Path]::GetFileName($rel)) + '.xbf')
+            if (-not (Test-Path $source)) { continue }
+            $target = Join-Path $BuildDir "$rel.xbf"
+            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
+            [IO.File]::Copy($source, $target, $true)
+            $xbfDeployed[$rel] = $source
+        }
+    }
+    if ($xbfDeployed.Count -eq 0) {
+        throw "no XBF deployed: no ms-appx:/// <path>.xaml URI found under $genComponent"
+    }
+    Write-Host "markup   : $($xbfDeployed.Count) xbf deployed at their ms-appx paths"
+    foreach ($rel in ($xbfDeployed.Keys | Sort-Object)) {
+        Write-Host "  xbf    : $rel.xbf"
+    }
 }
 
 Step 'dev build OK'
