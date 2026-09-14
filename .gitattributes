@@ -1,0 +1,10 @@
+## Keep orchestration scripts LF. CRLF breaks a justfile recipe's `#!pwsh`
+## shebang and any `set -euo pipefail`-style first line.
+justfile text eol=lf
+*.ps1 text eol=lf
+
+## Source stays as-is
+*.cpp text
+*.h text
+*.idl text
+*.xaml text

@@ -1,0 +1,42 @@
+{
+  "_readme": "复制到 %LOCALAPPDATA%\\w-music\\providers\\ 后改名为 <你的源>.json，再按需填写。字段说明见 adapters/README.md。",
+  "id": "my-source",
+  "name": "我的音乐源",
+  "baseUrl": "https://example.invalid",
+  "charset": "utf-8",
+  "minIntervalMs": 500,
+  "headers": {
+    "User-Agent": "w-music/1.0"
+  },
+
+  "search": {
+    "url": "/api/search?q={query_enc}&limit=20",
+    "method": "GET",
+    "listPath": "data.list",
+    "fields": [
+      { "key": "id",       "source": "json", "pattern": "id",          "required": true },
+      { "key": "title",    "source": "json", "pattern": "name" },
+      { "key": "artist",   "source": "json", "pattern": "artist.name" },
+      { "key": "album",    "source": "json", "pattern": "album.name" },
+      { "key": "duration", "source": "json", "pattern": "duration" },
+      { "key": "cover",    "source": "json", "pattern": "cover" },
+      { "key": "download", "source": "static", "value": "https://example.invalid/file/{id}" }
+    ]
+  },
+
+  "detail": {
+    "url": "/api/track/{id}",
+    "method": "GET",
+    "fields": [
+      { "key": "play",     "source": "json", "pattern": "data.url" },
+      { "key": "download", "source": "json", "pattern": "data.url" }
+    ]
+  },
+
+  "lyric": {
+    "url": "/api/lyric/{id}",
+    "method": "GET"
+  },
+
+  "detailRequired": false
+}
