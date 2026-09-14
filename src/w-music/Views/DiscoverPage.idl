@@ -1,0 +1,9 @@
+namespace w_music
+{
+    runtimeclass DiscoverPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        DiscoverPage();
+
+        LibraryViewModel ViewModel { get; };
+    }
+}

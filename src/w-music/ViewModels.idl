@@ -1,0 +1,84 @@
+namespace w_music
+{
+    enum PlayMode
+    {
+        Sequential = 0,
+        LoopAll = 1,
+        Shuffle = 2,
+        RepeatOne = 3,
+    };
+
+    /// Everything the UI needs to drive (and observe) the player:
+    /// current track, transport state, lyrics and spectrum data.
+    runtimeclass PlayerViewModel : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        PlayerViewModel();
+
+        /// The underlying MediaPlayer; MediaPlayerElement is wired to it in code.
+        Windows.Media.Playback.MediaPlayer Player { get; };
+
+        TrackItem CurrentTrack { get; };
+        Boolean HasTrack { get; };
+        String Title { get; };
+        String Artist { get; };
+        String Album { get; };
+
+        Boolean IsPlaying { get; };
+        Double PositionSeconds { get; set; };
+        Double DurationSeconds { get; };
+        String PositionText { get; };
+        String DurationText { get; };
+        Double Volume { get; set; };
+        Boolean IsMuted { get; set; };
+
+        PlayMode Mode { get; set; };
+        String ModeText { get; };
+        Boolean IsFavorite { get; set; };
+
+        // ---- lyrics ----
+        Windows.Foundation.Collections.IObservableVector<LyricLineItem> Lyrics { get; };
+        Boolean HasLyrics { get; };
+        Int32 ActiveLyricIndex { get; };
+        Int64 LyricOffsetMs { get; set; };
+
+        void TogglePlayPause();
+        void Next();
+        void Previous();
+        void Seek(Double seconds);
+        void CycleMode();
+        void ToggleFavorite();
+        void SetQueue(Windows.Foundation.Collections.IVector<TrackItem> tracks, Int32 startIndex);
+        void PlayTrack(TrackItem track);
+        void PlayTrackById(String trackId);
+        void SeekToLyric(Int32 index);
+        void AdjustLyricOffset(Int64 deltaMs);
+    }
+
+    /// Library, playlists and the Discover page.
+    runtimeclass LibraryViewModel : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        LibraryViewModel();
+
+        Windows.Foundation.Collections.IObservableVector<TrackItem> Tracks { get; };
+        Windows.Foundation.Collections.IObservableVector<PlaylistItem> Playlists { get; };
+        Windows.Foundation.Collections.IObservableVector<TrackItem> DiscoverRecent { get; };
+        Windows.Foundation.Collections.IObservableVector<TrackItem> DiscoverTop { get; };
+        Windows.Foundation.Collections.IObservableVector<TrackItem> DiscoverShuffle { get; };
+        /// Contents of the playlist currently open in the playlist page.
+        Windows.Foundation.Collections.IObservableVector<TrackItem> PlaylistTracks { get; };
+
+        Int32 TrackCount { get; };
+        String StatusText { get; };
+        Boolean IsScanning { get; };
+        String CurrentPlaylistName { get; };
+
+        Windows.Foundation.IAsyncAction InitializeAsync(Microsoft.UI.WindowId windowId);
+        Windows.Foundation.IAsyncAction AddFolderAsync();
+        Windows.Foundation.IAsyncAction RescanAsync();
+        void CreatePlaylist(String name);
+        void ToggleFavorite(TrackItem track);
+        Windows.Foundation.IAsyncAction OpenPlaylistAsync(String playlistId);
+        void PlayPlaylist(String playlistId);
+        void PlayAll();
+    }
+}

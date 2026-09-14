@@ -1,0 +1,46 @@
+## Build outputs
+/build/
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM64/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## NuGet
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+*.nuget.props
+*.nuget.targets
+
+## Generated
+Generated Files/
+*.g.h
+*.g.cpp
+
+## Local data
+*.tmp
+
+## Online-source adapters: user data, never committed.
+## Real adapters live in %LOCALAPPDATA%\w-music\providers (or WMUSIC_PROVIDER_DIR).
+## Anything dropped in adapters/ is loaded at runtime but stays out of git.
+adapters/*
+!adapters/README.md
+!adapters/template.json.example
+!adapters/jamendo.json.example
+
+## Python bytecode
+__pycache__/
+*.pyc
+
+## Agent/tool working state (local machine only -- contains absolute paths).
+## Kept on disk and out of git; see .workbuddy/memory/ for the build notes.
+.workbuddy/

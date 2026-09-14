@@ -1,0 +1,27 @@
+namespace w_music
+{
+    runtimeclass OnlinePage : Microsoft.UI.Xaml.Controls.Page
+    {
+        OnlinePage();
+
+        /// Click / event handlers referenced from XAML (including inside the
+        /// item DataTemplates -- XAML resolves them through metadata, so they
+        /// must be projected).
+        void OnSourceTabClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnQueryBoxKeyDown(IInspectable sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs args);
+        void OnRescanClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+
+        void OnQqSearchClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnQqResultClick(IInspectable sender, Microsoft.UI.Xaml.Controls.ItemClickEventArgs args);
+        void OnQqDownloadClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+
+        void OnNet24SearchClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnNet24SaveClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnNet24ResultClick(IInspectable sender, Microsoft.UI.Xaml.Controls.ItemClickEventArgs args);
+        void OnQualityChipClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnClearHistoryClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+
+        void OnSearchClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnResultAction(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+    }
+}

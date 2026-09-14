@@ -1,0 +1,9 @@
+namespace w_music
+{
+    runtimeclass NowPlayingPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        NowPlayingPage();
+
+        PlayerViewModel Player { get; };
+    }
+}

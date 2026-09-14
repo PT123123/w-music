@@ -1,0 +1,40 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003"
+         ToolsVersion="Current">
+
+  <PropertyGroup>
+    <MSBuildProjectName>w-music</MSBuildProjectName>
+    <XamlProjectName>w-music</XamlProjectName>
+    <RootNamespace>w_music</RootNamespace>
+    <Language>CppWinRT</Language>
+    <DefaultLanguageSourceExtension>.cpp</DefaultLanguageSourceExtension>
+    <TargetPlatformIdentifier>Windows</TargetPlatformIdentifier>
+    <SDKIdentifier>Windows</SDKIdentifier>
+    <SDKVersion>10.0.26100.0</SDKVersion>
+    <TargetPlatformVersion>10.0.26100.0</TargetPlatformVersion>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <WindowsSdkPath>C:\Program Files (x86)\Windows Kits\10</WindowsSdkPath>
+    <XamlGeneratedOutputPath>C:\Users\ted\Desktop\w-music\build\gen\xaml-schema</XamlGeneratedOutputPath>
+    <UseXamlCompilerExecutable>true</UseXamlCompilerExecutable>
+    <IsNativeLanguage>true</IsNativeLanguage>
+    <AppContainerApplication>false</AppContainerApplication>
+    <EnableWin32Codegen>true</EnableWin32Codegen>
+    <OutputType>WinExe</OutputType>
+    <VCInstallPath32>C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x86\vcmeta.dll</VCInstallPath32>
+    <VCInstallPath64>C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\vcmeta.dll</VCInstallPath64>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Page Include="C:\Users\ted\Desktop\w-music\src\w-music\Views\DiscoverPage.xaml" />
+    <ClCompile Include="C:\Users\ted\Desktop\w-music\src\w-music\Views\DiscoverPage.cpp" />
+    <ReferencePath Include="C:\Users\ted\.nuget\packages\microsoft.windowsappsdk.winui\2.3.0\metadata\Microsoft.UI.Xaml.winmd" />
+    <ReferencePath Include="C:\Users\ted\.nuget\packages\microsoft.windowsappsdk.winui\2.3.0\metadata\Microsoft.UI.Text.winmd" />
+    <ReferencePath Include="C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.26100.0\Windows.winmd" />
+    <ReferenceAssemblyPaths Include="C:\Users\ted\.nuget\packages\microsoft.windowsappsdk.winui\2.3.0\metadata\Microsoft.UI.Xaml.winmd" />
+    <ReferenceAssemblyPaths Include="C:\Users\ted\.nuget\packages\microsoft.windowsappsdk.winui\2.3.0\metadata\Microsoft.UI.Text.winmd" />
+    <ReferenceAssemblyPaths Include="C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.26100.0\Windows.winmd" />
+  </ItemGroup>
+
+  <Import Project="C:\Users\ted\.nuget\packages\microsoft.windowsappsdk.winui\2.3.0\build\native\Microsoft.WinUI.targets" />
+
+  <Target Name="EmitSchema" DependsOnTargets="MarkupCompilePass1" />
+</Project>

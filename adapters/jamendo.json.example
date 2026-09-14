@@ -1,0 +1,26 @@
+{
+  "_readme": "Jamendo（https://www.jamendo.com，CC 授权独立音乐）需要免费 API key：到 https://devportal.jamendo.com 注册应用拿到 client_id，替换下面 URL 里的 YOUR_CLIENT_ID，然后把本文件改名成 jamendo.json 放进 %LOCALAPPDATA%\\w-music\\providers（或 WMUSIC_PROVIDER_DIR 指向的目录），回到「在线发现」点「重新加载」即可。",
+  "id": "jamendo",
+  "name": "Jamendo",
+  "baseUrl": "https://api.jamendo.com/v3.0",
+  "charset": "utf-8",
+  "minIntervalMs": 400,
+
+  "search": {
+    "url": "/tracks/?client_id=YOUR_CLIENT_ID&format=json&limit=30&search={query_enc}",
+    "method": "GET",
+    "listPath": "results",
+    "fields": [
+      { "key": "id",       "source": "json", "pattern": "id", "required": true },
+      { "key": "title",    "source": "json", "pattern": "name" },
+      { "key": "artist",   "source": "json", "pattern": "artist_name" },
+      { "key": "album",    "source": "json", "pattern": "album_name" },
+      { "key": "duration", "source": "json", "pattern": "duration" },
+      { "key": "play",     "source": "json", "pattern": "audio" },
+      { "key": "download", "source": "json", "pattern": "audiodownload" },
+      { "key": "license",  "source": "json", "pattern": "license_ccurl" }
+    ]
+  },
+
+  "detailRequired": false
+}
