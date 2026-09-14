@@ -41,6 +41,13 @@ namespace wm::app
         std::wstring Net24BaseUrl() const noexcept { return m_net24BaseUrl; }
         void Net24BaseUrl(std::wstring const& value);
 
+        /// QQ 音乐扫码登录态（持久化，供播放/歌词复用）。
+        std::wstring QqSessionCookie() const noexcept { return m_qqSessionCookie; }
+        std::wstring QqUin() const noexcept { return m_qqUin; }
+        bool QqLoggedIn() const noexcept { return !m_qqSessionCookie.empty(); }
+        void SetQqSession(std::wstring const& cookie, std::wstring const& uin);
+        void ClearQqSession();
+
         static constexpr std::size_t MaxHistory = 12;
 
     private:
@@ -50,6 +57,8 @@ namespace wm::app
         std::wstring m_discoverSource{ SourceQq() };
         std::vector<std::wstring> m_searchHistory;
         std::wstring m_net24BaseUrl;
+        std::wstring m_qqSessionCookie;
+        std::wstring m_qqUin;
     };
 
     DiscoverSettings& Settings();

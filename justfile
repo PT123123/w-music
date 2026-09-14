@@ -56,6 +56,15 @@ run:
     $PSNativeCommandUseErrorActionPreference = $true
     & '{{driver}}'
 
+# Launch the app GUI (build first if the exe is missing).
+launch:
+    #!pwsh -NoProfile
+    $ErrorActionPreference = 'Stop'
+    $exe = '{{build_dir}}\w-music.exe'
+    if (-not (Test-Path $exe)) { & '{{driver}}' -NoTests }
+    Start-Process -FilePath $exe
+    Write-Host 'w-music launched.'
+
 # Force the C++/WinRT projections to regenerate, then build.
 gen:
     #!pwsh -NoProfile

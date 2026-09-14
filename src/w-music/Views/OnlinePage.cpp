@@ -163,6 +163,23 @@ namespace winrt::w_music::implementation
             }
             return item;
         }
+
+        /// QqSource pre-wired with the persisted login session (when present),
+        /// so preview/direct-url requests honour the logged-in account.
+        wm::core::QqSource QqSourceWithSession()
+        {
+            wm::core::QqSource source{ wm::app::Online().Transport() };
+            auto& settings = wm::app::Settings();
+            if (settings.QqLoggedIn())
+            {
+                std::wstring const cookie{ settings.QqSessionCookie().c_str() };
+                std::wstring const uin{ settings.QqUin().c_str() };
+                source.SetSession(
+                    wm::app::Utf8(std::wstring_view{ cookie.data(), cookie.size() }),
+                    wm::app::Utf8(std::wstring_view{ uin.data(), uin.size() }));
+            }
+            return source;
+        }
     } // namespace
 
     OnlinePage::OnlinePage()
@@ -184,6 +201,7 @@ namespace winrt::w_music::implementation
         RebuildSources();
         LoadAdapters();
         ApplySourceSelection(m_currentSource);
+        RefreshQqLoginUi();
         RefreshSuggestions();
         RefreshLibraryStats();
     }
@@ -484,7 +502,7 @@ namespace winrt::w_music::implementation
         std::string url;
         co_await winrt::resume_background();
         {
-            wm::core::QqSource source{ wm::app::Online().Transport() };
+            wm::core::QqSource source = QqSourceWithSession();
             url = source.DirectUrl(Narrow(item.Id()));
         }
         co_await m_ui;
@@ -506,6 +524,171 @@ namespace winrt::w_music::implementation
         wm::app::Player().PlayTrack(track);
         OnlineStatus().Text(hstring{ L"正在播放：" + std::wstring{ item.Title().c_str() } +
                                      L"（喜欢就点行内的 ⤓ 下载入库）" });
+    }
+
+    // ------------------------------------------------------ QQ 扫码登录
+
+    void OnlinePage::RefreshQqLoginUi()
+    {
+        auto& settings = wm::app::Settings();
+        if (settings.QqLoggedIn())
+        {
+            QqLoginButton().Content(box_value(hstring{ L"退出登录" }));
+            QqLoginStatus().Text(hstring{ L"已登录 QQ：" + settings.QqUin() });
+        }
+        else
+        {
+            QqLoginButton().Content(box_value(hstring{ L"扫码登录" }));
+            QqLoginStatus().Text(L"未登录 · 仅免费音质");
+        }
+    }
+
+    void OnlinePage::OnQqLoginClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto& settings = wm::app::Settings();
+        if (settings.QqLoggedIn())
+        {
+            ContentDialog confirm;
+            confirm.Title(box_value(hstring{ L"退出 QQ 登录" }));
+            confirm.Content(box_value(hstring{ L"确定要退出当前 QQ 账号吗？" }));
+            confirm.PrimaryButtonText(L"退出");
+            confirm.CloseButtonText(L"取消");
+            confirm.XamlRoot(XamlRoot());
+            if (confirm.ShowAsync().get() == ContentDialogResult::Primary)
+            {
+                settings.ClearQqSession();
+                RefreshQqLoginUi();
+                OnlineStatus().Text(L"已退出登录。");
+            }
+            return;
+        }
+        RunQqLoginDialog();
+    }
+
+    winrt::fire_and_forget OnlinePage::RunQqLoginDialog()
+    {
+        auto lifetime = get_strong();
+        if (m_qqResolving)
+        {
+            co_return;
+        }
+        m_qqResolving = true;
+
+        // 1. Fetch a fresh QR code off the worker thread.
+        wm::core::QqLoginFlow flow{ wm::app::Online().Transport() };
+        wm::core::QqLoginContext context;
+        co_await winrt::resume_background();
+        context = flow.FetchQr();
+        co_await m_ui;
+        m_qqResolving = false;
+
+        if (!context.ok)
+        {
+            ContentDialog error;
+            error.Title(box_value(hstring{ L"登录失败" }));
+            error.Content(box_value(hstring{ wm::app::Utf16(context.reason) }));
+            error.CloseButtonText(L"好");
+            error.XamlRoot(XamlRoot());
+            error.ShowAsync();
+            co_return;
+        }
+
+        // 2. Compose the dialog: QR picture + live status line.
+        auto qrImage = Media::Imaging::BitmapImage{};
+        try
+        {
+            Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+            Windows::Storage::Streams::DataWriter writer{ stream };
+            std::vector<std::uint8_t> bytes(context.qrImage.begin(), context.qrImage.end());
+            writer.WriteBytes(bytes);
+            writer.StoreAsync().get();
+            stream.Seek(0);
+            qrImage.SetSourceAsync(stream).get();
+        }
+        catch (...)
+        {
+            // QR payload malformed; the status line below explains the failure.
+        }
+
+        auto image = Image{};
+        image.Width(220);
+        image.Height(220);
+        image.Source(qrImage);
+
+        auto status = TextBlock{};
+        status.Text(L"请用手机 QQ 扫描二维码");
+        status.HorizontalAlignment(HorizontalAlignment::Center);
+        status.FontSize(13);
+        status.Opacity(0.85);
+
+        auto hint = TextBlock{};
+        hint.Text(L"登录后播放/下载可享当前账号的会员权益");
+        hint.HorizontalAlignment(HorizontalAlignment::Center);
+        hint.FontSize(11.5);
+        hint.Opacity(0.55);
+
+        auto panel = StackPanel{};
+        panel.Spacing(10);
+        panel.Children().Append(image);
+        panel.Children().Append(status);
+        panel.Children().Append(hint);
+
+        ContentDialog dialog;
+        dialog.Title(box_value(hstring{ L"QQ 音乐 · 扫码登录" }));
+        dialog.Content(panel);
+        dialog.CloseButtonText(L"取消");
+        dialog.XamlRoot(XamlRoot());
+        dialog.Closed([weak = get_weak()](IInspectable const&, ContentDialogClosedEventArgs const&) {
+            // The dialog is gone; nothing else to reset (m_qqResolving was
+            // already cleared on open).
+            (void)weak;
+        });
+
+        // 3. Show and poll until the phone confirms.
+        PollQqLogin(dialog, flow, context, status);
+        dialog.ShowAsync();
+    }
+
+    winrt::fire_and_forget OnlinePage::PollQqLogin(ContentDialog dialog,
+                                                   wm::core::QqLoginFlow flow,
+                                                   wm::core::QqLoginContext context,
+                                                   TextBlock status)
+    {
+        auto lifetime = get_strong();
+
+        wm::core::QqLoginResult result;
+        for (int attempt = 0; attempt < 30; ++attempt)   // ~60s cap
+        {
+            co_await winrt::resume_after(std::chrono::seconds{ 2 });
+            co_await winrt::resume_background();
+            result = flow.CheckStatus(context);
+            co_await m_ui;
+
+            switch (result.status)
+            {
+            case wm::core::QqLoginStatus::Scanned:
+                status.Text(L"已扫码，请在手机上确认登录");
+                continue;
+            case wm::core::QqLoginStatus::Waiting:
+                status.Text(L"等待扫码…");
+                continue;
+            case wm::core::QqLoginStatus::Success:
+            {
+                status.Text(L"登录成功！");
+                wm::app::Settings().SetQqSession(
+                    wm::app::Utf16(result.cookie),
+                    wm::app::Utf16(result.uin));
+                RefreshQqLoginUi();
+                OnlineStatus().Text(hstring{ L"已登录 QQ：" + wm::app::Utf16(result.uin) });
+                dialog.Hide();
+                co_return;
+            }
+            default:
+                status.Text(hstring{ L"登录失败：" + wm::app::Utf16(result.reason) });
+                co_return;
+            }
+        }
+        status.Text(L"二维码已过期，请重新打开登录窗口");
     }
 
     void OnlinePage::OnQqResultClick(IInspectable const&, Controls::ItemClickEventArgs const& args)
@@ -545,7 +728,7 @@ namespace winrt::w_music::implementation
         std::string url;
         co_await winrt::resume_background();
         {
-            wm::core::QqSource source{ wm::app::Online().Transport() };
+            wm::core::QqSource source = QqSourceWithSession();
             url = source.DirectUrl(Narrow(item.Id()));
         }
         co_await m_ui;

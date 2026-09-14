@@ -1,6 +1,6 @@
 # w-music
 
-类 QQ 音乐的 Windows 桌面播放器：**WinUI 3 (C++/WinRT)** 界面 + **MediaPlayerElement** 播放 + **WASAPI loopback** 实时频谱，曲库本地优先。
+类 QQ 音乐的 Windows 桌面播放器：**WinUI 3 (C++/WinRT)** 界面 + **MediaPlayerElement** 播放 + **WASAPI loopback** 实时频谱。曲库本地优先，同时内置 **QQ 音乐在线源**（搜索 / 扫码登录 / 试听 / 歌词 / 下载）。
 
 ## 技术选型
 
@@ -10,25 +10,29 @@
 | 播放 | `Windows.Media.Playback.MediaPlayer` 挂到 `MediaPlayerElement` | 解码交给 Media Foundation，支持 mp3/flac/m4a/wav… |
 | 频谱 | WASAPI loopback 采集 + FFT | `IMMDeviceEnumerator` + `IAudioClient(AUDCLNT_STREAMFLAGS_LOOPBACK)` |
 | 持久化 | 单个 JSON（core 层自带解析器） | `%LOCALAPPDATA%\w-music\library.json`，无外部依赖 |
-| 数据/算法 | 平台无关 C++17（见 `core/`） | FFT、频谱、LRC 解析、曲库/歌单、播放队列 |
+| 数据/算法 | 平台无关 C++17（见 `core/`） | FFT、频谱、LRC 解析、曲库/歌单、播放队列、在线源引擎 |
+| 在线源 | QQ 音乐官方 Web 接口直连（`QqSource`） | 搜索 / 歌词 / 扫码登录 / 试听 vkey 直链；会话 cookie 持久化到 `settings.json` |
 
 ## 目录结构
 
 ```
 core/                     平台无关核心层（可用 g++ 直接编译并单测）
-  include/wm/core/        Fft, SpectrumAnalyzer, LyricParser, Json, LibraryStore, PlayQueue
-  src/  tests/            94 项断言，见下方"核心层测试"
+  include/wm/core/        Fft, SpectrumAnalyzer, LyricParser, Json, LibraryStore, PlayQueue,
+                          OnlineSources（QqSource / QqLoginFlow）, ProviderEngine, ProviderAdapter
+  src/  tests/            344 项断言（3 个测试程序），见下方"核心层测试"
 src/w-music/              WinUI 3 应用
-  App.* / MainWindow.*    应用入口 + 导航（发现 / 在线发现 / 我的音乐 / 正在播放）+ 底部播放条
-  Models.*  Models/       TrackItem / PlaylistItem / LyricLineItem / OnlineTrackItem（XAML 可绑定）
+  App.* / MainWindow.*    应用入口 + 导航（发现 / 在线发现 / 我的音乐 / 正在播放）+ 底部播放条 + 系统托盘
+  Models.*  Models/       TrackItem / PlaylistItem / LyricLineItem / OnlineTrackItem / QualityChipItem（XAML 可绑定）
   ViewModels.*  ViewModels/  PlayerViewModel / LibraryViewModel
-  Services/               LibraryService（扫描/持久化/歌单）、OnlineProviderService（在线源）、
-                          BuiltinProviders（内置 CC 授权源）、AppPaths、Services（单例）
+  Services/               LibraryService（扫描/持久化/歌单）、OnlineProviderService（在线源，含 QQ 直连）、
+                          BuiltinProviders（内置 CC 授权源）、DiscoverSettings（设置/QQ 登录态持久化）、
+                          TrayIcon（Shell_NotifyIcon 托盘）、AppPaths、Services（单例）
   Audio/WasapiLoopback.*  WASAPI loopback 采集线程
   Controls/SpectrumView.* 直接操作 Rectangle 的频谱绘制（不走绑定，省开销）
   Views/                  DiscoverPage / OnlinePage / LibraryPage / NowPlayingPage
 adapters/                 适配器模板与文档（真实适配器放外部目录，见下）
-tools/gen_assets.py       生成 MSIX 占位图标
+tools/gen_assets.py       生成 MSIX 占位图标（历史保留）
+tools/gen_icon.ps1        生成 Assets\app.ico（窗口/托盘/任务栏图标）
 ```
 
 ## 构建与运行
@@ -42,6 +46,7 @@ just build              # 全量：投影 → IDL → cppwinrt → build.ninja �
 just fast               # 复用已生成的投影，只重编（改 .cpp 时的内循环）
 just test               # 跑 core 单测
 just run                # 全量构建 + 跑单测
+just launch             # 启动 build\w-music.exe（exe 不存在时先构建）
 just gen                # 强制重生成 C++/WinRT 投影后再构建（改过 .idl 时用）
 just clean              # 删掉 build\（下次全量重生成，约 2 分钟）
 just clean-soft         # 只删 obj / exe / 日志，保留上千个投影头文件
@@ -64,14 +69,14 @@ just tools              # 只打印探到的工具链路径
 > 实测空转 `just fast` 从 ~53s 降到 ~13s。
 
 > 本机没有 VS 的 "C++ v143 UWP tools" 组件（即 C++ XAML markup compiler，`Microsoft.Windows.UI.Xaml.Cpp.targets`），
-> 所以**不做 MSIX 打包**；页面代码是拿 `build\gen\component\w_music\*.xaml.g.h`（x:Name 访问器声明，
-> 由脚本从 .xaml 提取生成）与空的 `*.g.cpp` 替身做**编译校验**，不产出 XBF。
-> 要真正打包/运行仍需在 VS 里装该组件。也正因如此，`just run` 现在跑的是 **core 单测**，
-> 不是启动应用——本机还没有可链接/可启动的 exe。
+> 所以**不做 MSIX 打包**；XAML 由 `tools\xaml-markup.ps1` 直接驱动 XamlCompiler 生成
+> `build\gen\component\w_music\*.xaml.g.h` 与 XBF，非打包 WinUI 3 应用可正常构建运行。
+> 产物 `build\w-music.exe` 依赖已注册的 **WindowsAppRuntime 2.3.1 框架包**（引导程序找不到会弹框提示）。
+> `just run` 跑的是 core 单测，启动界面用 `just launch`。
 
 首次启动 → 发现页点 **添加音乐文件夹** → 选你的音乐目录 → 递归扫描并读取 `MusicProperties` 元数据建库。
 
-## 已实现的三块功能
+## 已实现的功能
 
 ### 1. 曲库 / 发现页
 - `FolderPicker` 选目录，权限 token 存进 `FutureAccessList`，下次启动自动重扫。
@@ -81,6 +86,10 @@ just tools              # 只打印探到的工具链路径
 ### 2. 在线发现（独立 tab）
 - 导航栏单独一个「**在线发现**」标签：选源 → 关键词搜索 → 行内按钮**试听 / 下载**，
   支持多选批量下载；下载完成自动导入本地曲库（「我的音乐」直接可见），歌词条件允许时顺带存 `.lrc`。
+- **内置源：QQ 音乐**（官方 Web 接口直连，`core/src/OnlineSources.cpp` 的 `QqSource`）。
+  关键词搜索 → 行内**试听 / 下载**（登录后按账号权限取 vkey 直链，未登录仅免费音质）→ 下载完成自动导入曲库 → **歌词**随播放自动加载（QQ 歌词接口 `nobase64=1` 纯文本 LRC）。
+  - **扫码登录**：QQ 区「扫码登录」按钮 → 弹出二维码对话框 → 轮询扫码/确认状态 → 成功后把会话 cookie 与 uin 持久化到 `settings.json`，重启自动恢复；登录后试听/下载继承当前账号的会员权益。点「退出登录」可随时清除。
+  - 登录流程实现在 `core` 层（`QqLoginFlow`：取二维码 → `qrsig` → `hash33` 算 `ptqrtoken` → 轮询 `ptuiCB`），与 UI 解耦，便于单测。
 - **内置源：ccMixter**（零配置可用）。ccMixter 是创作者自愿共享的 CC 授权社区音乐，公开 JSON 接口；
   因为其文件直链要求浏览器式 UA + Referer（播放器发不了），试听走"程序缓存到本地再播"（`preview: "cache"`），
   下载则带上适配器声明的请求头直取无损 FLAC。搜索按标签进行（jazz / piano / remix / acapella…）。
@@ -92,9 +101,8 @@ just tools              # 只打印探到的工具链路径
   或 `listPath`(JSON 路径，`"$"` 为根数组) 切分记录，支持 `flattenPath`（嵌套文件数组展开）、
   字段提取（`regex` / `json` / `static`）→ 可选 detail 二次请求拿真实地址 → 可选 lyric。
 
-> 关于"对接 QQ 音乐 / 24bit.net 这类站点"：它们提供的是未授权商业音乐的下载，或直接依赖私有加密协议——
-> 逆向调用既违反服务条款也有版权风险，接口一改就全崩。所以仓库**不内置、也不会生成任何针对具体站点的抓取规则**。
-> 请对接你有权使用的内容：自己的后端、NAS、自建网关，或明确授权/开放授权的接口。引擎不关心目标是谁，你填的 JSON 决定它去哪。
+> 版权提示：QQ 音乐是版权商业内容。内置源只调用其**公开 Web 接口**（搜索 / 歌词 / 扫码登录 / 试听直链），
+> 不逆向私有加密协议；请用本人账号并遵守服务条款，下载内容仅限个人试听，勿再分发。
 
 ### 3. 列表管理
 - 歌单：`新建 / 删除 / 重命名 / 加入曲目`，内置「我喜欢的音乐」「最近播放」（不可删除）。
@@ -126,13 +134,15 @@ g++ -std=c++17 -I core/include core/src/*.cpp core/tests/test_core.cpp -o test_c
 g++ -std=c++17 -I core/include core/src/*.cpp core/tests/test_provider.cpp -o test_provider && ./test_provider
 # provider: 104 checks, 0 failed
 g++ -std=c++17 -I core/include core/src/*.cpp core/tests/test_online_sources.cpp -o test_online && ./test_online
+# online sources: 146 checks, 0 failed
 ```
 
 覆盖：FFT（直流/单频峰值定位/非法尺寸）、频谱（高频能量分布、值域、静音衰减）、
 LRC（多标签/offset/增强标签/UTF-16/序列化往返）、JSON（嵌套/Unicode/错误输入/round-trip）、
 曲库（持久化、重扫不丢统计、歌单增删）、播放队列（四种模式语义）；
 在线源引擎（模板渲染、URL 编码、JSON 路径、根数组("$")、嵌套展开、正则提取、HTML 实体、
-HTML 与 JSON 两条完整管线、detail 二次解析、限流条数、失败路径）。
+HTML 与 JSON 两条完整管线、detail 二次解析、限流条数、失败路径）；
+QQ 音乐（`QqSource::Lyric` 歌词解析、`QqLoginFlow::Hash33`、二维码上下文解析、`ptuiCB` 轮询状态解析、会话 cookie 拼接）。
 
 ## 已知限制 / 下一步
 

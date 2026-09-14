@@ -7,59 +7,58 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid>
+    <Grid Background="{ThemeResource WmBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- ===== custom title bar (window content extends into it) ===== -->
-        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="44">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <FontIcon Grid.Column="0"
-                      Glyph="&#xEC4F;"
-                      FontSize="15"
-                      Margin="16,0,8,0"
-                      Foreground="{ThemeResource WmAccentBrush}" />
-            <TextBlock Grid.Column="1"
-                       Text="w-music"
-                       VerticalAlignment="Center"
-                       FontSize="13"
-                       Opacity="0.85" />
-        </Grid>
+        <!-- ===== 标题栏（窗口拖动区） ===== -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40" />
 
-        <!-- ===== navigation + page host ===== -->
+        <!-- ===== 左侧导航 + 页面宿主 ===== -->
         <NavigationView x:Name="NavView"
                         Grid.Row="1"
                         PaneDisplayMode="Left"
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False"
-                        OpenPaneLength="196">
+                        OpenPaneLength="208"
+                        Background="{ThemeResource WmBgBrush}">
+            <NavigationView.PaneHeader>
+                <Grid Height="60">
+                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
+                        <Border Width="26" Height="26" CornerRadius="8"
+                                Background="{ThemeResource WmAccentBrush}">
+                            <FontIcon Glyph="&#xEC4F;" FontSize="14" Foreground="White"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="w-music" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </NavigationView.PaneHeader>
+
             <NavigationView.MenuItems>
-                <NavigationViewItem x:Name="DiscoverNavItem" Tag="discover" Content="发现">
+                <NavigationViewItem x:Name="DiscoverNavItem" Tag="discover" Content="发现音乐">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE10F;" />
+                        <FontIcon Glyph="&#xE10F;" FontSize="15" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem x:Name="OnlineNavItem" Tag="online" Content="在线发现">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE774;" />
+                        <FontIcon Glyph="&#xE774;" FontSize="15" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem x:Name="LibraryNavItem" Tag="library" Content="我的音乐">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE8D6;" />
+                        <FontIcon Glyph="&#xE8D6;" FontSize="15" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem x:Name="NowPlayingNavItem" Tag="nowplaying" Content="正在播放">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE93C;" />
+                        <FontIcon Glyph="&#xE93C;" FontSize="15" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
@@ -67,88 +66,93 @@
             <Frame x:Name="ContentFrame" />
         </NavigationView>
 
-        <!-- ===== now playing bar ===== -->
+        <!-- ===== 底部播放条 ===== -->
         <Border Grid.Row="2"
                 Height="92"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Background="{ThemeResource WmSideBrush}"
+                BorderBrush="{ThemeResource WmCardBrush}"
                 BorderThickness="0,1,0,0">
-            <Grid Padding="12,0">
+            <Grid Padding="16,0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="220" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- cover placeholder -->
-                <Border Grid.Column="0"
-                        Width="60" Height="60"
-                        CornerRadius="6"
-                        Margin="0,0,12,0"
-                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                    <FontIcon Glyph="&#xEC4F;" FontSize="24" Foreground="{ThemeResource WmAccentBrush}" />
-                </Border>
-
-                <!-- title / artist -->
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock x:Name="NowPlayingTitle"
-                               Text="未在播放"
-                               FontSize="14"
-                               FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="NowPlayingArtist"
-                               FontSize="12"
-                               Opacity="0.7"
-                               Margin="0,2,0,0"
-                               TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="TimeText"
-                               Text="00:00 / 00:00"
-                               FontSize="11"
-                               Opacity="0.6"
-                               Margin="0,4,0,0" />
+                <!-- 左：封面 + 歌名 / 歌手 / 时间 -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Width="56" Height="56" CornerRadius="10"
+                            Background="{ThemeResource WmAccentSoftBrush}">
+                        <FontIcon Glyph="&#xEC4F;" FontSize="22" Foreground="{ThemeResource WmAccentBrush}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="NowPlayingTitle"
+                                   Text="未在播放"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="NowPlayingArtist"
+                                   FontSize="12"
+                                   Opacity="0.7"
+                                   Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="TimeText"
+                                   Text="00:00 / 00:00"
+                                   FontSize="11"
+                                   Opacity="0.55"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
                 </StackPanel>
 
-                <!-- transport -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="8,0">
-                    <Button x:Name="PrevButton" Width="40" Height="40" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="上一曲">
-                        <FontIcon Glyph="&#xE892;" FontSize="15" />
-                    </Button>
-                    <Button x:Name="PlayPauseButton" Width="44" Height="44" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="播放 / 暂停">
-                        <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" FontSize="20" />
-                    </Button>
-                    <Button x:Name="NextButton" Width="40" Height="40" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="下一曲">
-                        <FontIcon Glyph="&#xE893;" FontSize="15" />
-                    </Button>
-                    <Button x:Name="ModeButton" Width="40" Height="40" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="播放模式">
-                        <FontIcon Glyph="&#xE8EE;" FontSize="15" />
-                    </Button>
-                    <Button x:Name="FavoriteBarButton" Width="40" Height="40" Padding="0" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="喜欢">
-                        <FontIcon Glyph="&#xEB51;" FontSize="16" />
-                    </Button>
-                </StackPanel>
-
-                <!-- progress + spectrum -->
-                <Grid Grid.Column="3" Margin="12,0" VerticalAlignment="Center">
+                <!-- 中：播放控制 + 进度条 / 频谱 -->
+                <Grid Grid.Column="1" Margin="28,0" VerticalAlignment="Center">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <Slider x:Name="ProgressSlider"
-                            Grid.Row="0"
-                            Minimum="0"
-                            Maximum="100"
-                            StepFrequency="0.5"
-                            IsThumbToolTipEnabled="False" />
-                    <Canvas x:Name="SpectrumCanvas" Grid.Row="1" Height="26" HorizontalAlignment="Stretch" />
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                        <Button x:Name="PrevButton" Width="36" Height="36" CornerRadius="18" Padding="0"
+                                Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="上一曲">
+                            <FontIcon Glyph="&#xE892;" FontSize="14" />
+                        </Button>
+                        <Button x:Name="PlayPauseButton" Width="44" Height="44" CornerRadius="22" Padding="0"
+                                Background="{ThemeResource WmAccentBrush}" Foreground="White" BorderThickness="0"
+                                ToolTipService.ToolTip="播放 / 暂停">
+                            <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" FontSize="18" />
+                        </Button>
+                        <Button x:Name="NextButton" Width="36" Height="36" CornerRadius="18" Padding="0"
+                                Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="下一曲">
+                            <FontIcon Glyph="&#xE893;" FontSize="14" />
+                        </Button>
+                        <Button x:Name="ModeButton" Width="36" Height="36" CornerRadius="18" Padding="0"
+                                Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="播放模式">
+                            <FontIcon Glyph="&#xE8EE;" FontSize="14" />
+                        </Button>
+                        <Button x:Name="FavoriteBarButton" Width="36" Height="36" CornerRadius="18" Padding="0"
+                                Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="喜欢">
+                            <FontIcon Glyph="&#xEB51;" FontSize="15" />
+                        </Button>
+                    </StackPanel>
+                    <Grid Grid.Row="1" Height="36">
+                        <Slider x:Name="ProgressSlider"
+                                Minimum="0"
+                                Maximum="100"
+                                StepFrequency="0.5"
+                                IsThumbToolTipEnabled="False"
+                                VerticalAlignment="Center"
+                                Margin="0,0,0,8" />
+                        <Canvas x:Name="SpectrumCanvas" Height="16" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" />
+                    </Grid>
                 </Grid>
 
-                <!-- right side -->
-                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button x:Name="LyricButton" Content="歌词" Padding="10,6" ToolTipService.ToolTip="打开歌词页" />
+                <!-- 右：歌词 + 音量 -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Button x:Name="LyricButton" Content="歌词" Padding="12,6" CornerRadius="14"
+                            ToolTipService.ToolTip="打开歌词页" />
                     <FontIcon Glyph="&#xE767;" FontSize="14" Opacity="0.7" VerticalAlignment="Center" />
-                    <Slider x:Name="VolumeSlider" Width="96" Minimum="0" Maximum="1" StepFrequency="0.02" Value="0.8" VerticalAlignment="Center" />
+                    <Slider x:Name="VolumeSlider" Width="96" Minimum="0" Maximum="1" StepFrequency="0.02"
+                            Value="0.8" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Border>
