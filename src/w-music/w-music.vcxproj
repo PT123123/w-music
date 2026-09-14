@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <MinimalCoreWin>true</MinimalCoreWin>
+    <ProjectGuid>{6E9F1B2C-3D4A-4F5B-8C7D-9E0A1B2C3D4E}</ProjectGuid>
+    <ProjectName>w-music</ProjectName>
+    <RootNamespace>w_music</RootNamespace>
+    <DefaultLanguage>zh-CN</DefaultLanguage>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>MSIX</WindowsPackageType>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+
+  <PropertyGroup Label="UserMacros" />
+
+  <!-- Explicit output directories (the WinUI3 packaged-desktop layout; the
+       UWP-flavoured props that would otherwise define them are not used). -->
+  <PropertyGroup>
+    <OutDir Condition="'$(OutDir)' == ''">$(SolutionDir)x64\$(Configuration)\$(MSBuildProjectName)\</OutDir>
+    <IntDir Condition="'$(IntDir)' == ''">$(SolutionDir)obj\$(Platform)\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\..\core\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- ================= headers ================= -->
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="App.h" />
+    <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="Controls\SpectrumView.h" />
+    <ClInclude Include="Audio\WasapiLoopback.h" />
+    <ClInclude Include="Services\AppPaths.h" />
+    <ClInclude Include="Services\LibraryService.h" />
+    <ClInclude Include="Services\OnlineProviderService.h" />
+    <ClInclude Include="Services\BuiltinProviders.h" />
+    <ClInclude Include="Services\DiscoverSettings.h" />
+    <ClInclude Include="Services\Services.h" />
+    <ClInclude Include="Models\TrackItem.h" />
+    <ClInclude Include="Models\PlaylistItem.h" />
+    <ClInclude Include="Models\LyricLineItem.h" />
+    <ClInclude Include="Models\OnlineTrackItem.h" />
+    <ClInclude Include="Models\QualityChipItem.h" />
+    <ClInclude Include="ViewModels\PlayerViewModel.h" />
+    <ClInclude Include="ViewModels\LibraryViewModel.h" />
+    <ClInclude Include="Views\DiscoverPage.h" />
+    <ClInclude Include="Views\OnlinePage.h" />
+    <ClInclude Include="Views\LibraryPage.h" />
+    <ClInclude Include="Views\NowPlayingPage.h" />
+  </ItemGroup>
+
+  <!-- ================= sources ================= -->
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="App.cpp" />
+    <ClCompile Include="MainWindow.cpp" />
+    <ClCompile Include="Controls\SpectrumView.cpp" />
+    <ClCompile Include="Audio\WasapiLoopback.cpp" />
+    <ClCompile Include="Services\AppPaths.cpp" />
+    <ClCompile Include="Services\LibraryService.cpp" />
+    <ClCompile Include="Services\OnlineProviderService.cpp" />
+    <ClCompile Include="Services\BuiltinProviders.cpp" />
+    <ClCompile Include="Services\DiscoverSettings.cpp" />
+    <ClCompile Include="Services\Services.cpp" />
+    <ClCompile Include="Models\TrackItem.cpp" />
+    <ClCompile Include="Models\PlaylistItem.cpp" />
+    <ClCompile Include="Models\LyricLineItem.cpp" />
+    <ClCompile Include="Models\OnlineTrackItem.cpp" />
+    <ClCompile Include="Models\QualityChipItem.cpp" />
+    <ClCompile Include="ViewModels\PlayerViewModel.cpp" />
+    <ClCompile Include="ViewModels\LibraryViewModel.cpp" />
+    <ClCompile Include="Views\DiscoverPage.cpp" />
+    <ClCompile Include="Views\OnlinePage.cpp" />
+    <ClCompile Include="Views\LibraryPage.cpp" />
+    <ClCompile Include="Views\NowPlayingPage.cpp" />
+    <!-- platform-independent core layer (no pch.h -> no precompiled header) -->
+    <ClCompile Include="..\..\core\src\Fft.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\SpectrumAnalyzer.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\Lyric.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\LyricParser.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\Json.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\LibraryStore.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\PlayQueue.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\ProviderAdapter.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\ProviderEngine.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\OnlineSources.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+
+  <!-- ================= IDL (MIDL3 -> C++/WinRT projections) ================= -->
+  <ItemGroup>
+    <Midl Include="App.idl" />
+    <Midl Include="MainWindow.idl" />
+    <Midl Include="Models.idl" />
+    <Midl Include="ViewModels.idl" />
+    <Midl Include="Views\DiscoverPage.idl" />
+    <Midl Include="Views\OnlinePage.idl" />
+    <Midl Include="Views\LibraryPage.idl" />
+    <Midl Include="Views\NowPlayingPage.idl" />
+  </ItemGroup>
+
+  <!-- ================= XAML ================= -->
+  <ItemGroup>
+    <Page Include="App.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="MainWindow.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="Views\DiscoverPage.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="Views\OnlinePage.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="Views\LibraryPage.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="Views\NowPlayingPage.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+  </ItemGroup>
+
+  <!-- ================= manifests & assets ================= -->
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest">
+      <SubType>Designer</SubType>
+    </AppxManifest>
+    <Manifest Include="app.manifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Image Include="Assets\StoreLogo.png" />
+    <Image Include="Assets\Square44x44Logo.png" />
+    <Image Include="Assets\Square150x150Logo.png" />
+    <Image Include="Assets\Wide310x150Logo.png" />
+    <Image Include="Assets\SplashScreen.png" />
+    <Image Include="Assets\LockScreenLogo.png" />
+  </ItemGroup>
+
+  <!-- ================= NuGet ================= -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CppWinRT">
+      <Version>3.0.260818.1</Version>
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.WindowsAppSDK">
+      <Version>2.3.1</Version>
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

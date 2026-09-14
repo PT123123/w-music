@@ -1,0 +1,10 @@
+namespace w_music
+{
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    {
+        MainWindow();
+
+        LibraryViewModel Library { get; };
+        PlayerViewModel Player { get; };
+    }
+}

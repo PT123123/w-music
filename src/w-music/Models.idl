@@ -1,0 +1,94 @@
+namespace w_music
+{
+    /// One track in the library / a playlist. Mirrors wm::core::TrackRecord.
+    runtimeclass TrackItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        TrackItem();
+
+        String Id { get; set; };
+        String Title { get; set; };
+        String Artist { get; set; };
+        String Album { get; set; };
+        String FilePath { get; set; };
+        String DurationText { get; };
+        Int64 DurationMs { get; set; };
+        Boolean IsFavorite { get; set; };
+        Int32 PlayCount { get; set; };
+        /// True while this track is the one loaded in the player.
+        Boolean IsPlaying { get; set; };
+    }
+
+    /// A playlist (user playlist, favourites, or recently played).
+    runtimeclass PlaylistItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        PlaylistItem();
+
+        String Id { get; set; };
+        String Name { get; set; };
+        Int32 TrackCount { get; set; };
+        Boolean IsBuiltIn { get; set; };
+        String Glyph { get; set; };
+    }
+
+    /// A track offered by an online source, before it is downloaded. Produced by
+    /// the pluggable provider layer (see adapters/README.md) and by the two
+    /// built-in a-music replica sources ("qq" / "net24").
+    runtimeclass OnlineTrackItem
+    {
+        OnlineTrackItem();
+
+        String SourceId { get; set; };
+        String Id { get; set; };
+        String Title { get; set; };
+        String Artist { get; set; };
+        String Album { get; set; };
+        String DurationText { get; set; };
+        Int64 DurationMs { get; set; };
+        String PlayUrl { get; set; };
+        String DownloadUrl { get; set; };
+        String CoverUrl { get; set; };
+        String DetailUrl { get; set; };
+        /// Comma separated list of extra fields captured by the adapter.
+        String ExtraText { get; set; };
+        /// QQ 音乐: pay.play == 1 -> needs a VIP account.
+        Boolean VipOnly { get; set; };
+        /// 无损站: id as understood by the 母带源 ("a" / "c" detail pages).
+        String MasterId { get; set; };
+        /// 无损站: id as understood by the 无损源 ("b" detail pages).
+        String LosslessId { get; set; };
+        /// Download tiers this row carries (drives the quality chips).
+        Windows.Foundation.Collections.IVectorView<w_music.QualityChipItem> Qualities { get; };
+        /// Adds one download tier chip (无损站 rows only).
+        void AddQuality(String key, String label);
+        /// Visibility computed from VipOnly so XAML binds without a converter.
+        Microsoft.UI.Xaml.Visibility VipVisibility { get; };
+    }
+
+    /// One download tier of a 无损站 row (母带 / 环绕 / 无损 chip).
+    runtimeclass QualityChipItem
+    {
+        QualityChipItem();
+
+        /// "<id>:<type>" resolution key, e.g. "77001:b".
+        String Key { get; set; };
+        /// Short tier name shown on the chip: 母带 / 环绕 / 无损.
+        String Label { get; set; };
+    }
+
+    /// One timed lyric line.
+    runtimeclass LyricLineItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        LyricLineItem();
+
+        Int64 TimeMs { get; set; };
+        String Text { get; set; };
+        /// Highlighted because it matches the current playback position.
+        Boolean IsActive { get; set; };
+        /// Index used by the view to scroll this line into view.
+        Int32 Index { get; set; };
+        String TimeText { get; };
+        /// Computed from IsActive so the view can bind without a converter.
+        Microsoft.UI.Xaml.Media.Brush Foreground { get; };
+        Double FontSize { get; };
+    }
+}

@@ -1,0 +1,13 @@
+namespace w_music
+{
+    /// The application object is created directly by the generated wWinMain
+    /// (winrt::make<implementation::App>()), never through an activation factory.
+    /// Declaring App() here would make midlrt mark App as composable, and cppwinrt
+    /// would then emit a composable factory whose CreateInstance demands the
+    /// composable machinery (m_outer) that the markup compiler's AppT -- which
+    /// derives from Microsoft.UI.Xaml.ApplicationT, a 'composing but not
+    /// composable' base -- never provides.
+    unsealed runtimeclass App : Microsoft.UI.Xaml.Application
+    {
+    }
+}

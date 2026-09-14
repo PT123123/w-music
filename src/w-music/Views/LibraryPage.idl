@@ -1,0 +1,13 @@
+namespace w_music
+{
+    runtimeclass LibraryPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        LibraryPage();
+
+        LibraryViewModel ViewModel { get; };
+
+        /// Wired from the item template (Tag carries the track id).
+        void OnFavoriteClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+        void OnAddToPlaylistClick(IInspectable sender, Microsoft.UI.Xaml.RoutedEventArgs args);
+    }
+}
