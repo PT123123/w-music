@@ -7,34 +7,36 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid>
+    <Grid Background="{ThemeResource WmBgBrush}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- ===== left: cover, spectrum, transport ===== -->
-        <StackPanel Grid.Column="0" Padding="36,28" Spacing="14">
-            <Border Width="220" Height="220"
-                    CornerRadius="12"
-                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        <!-- ===== 左：封面、频谱、进度、控制 ===== -->
+        <StackPanel Grid.Column="0" Padding="48,32,32,28" Spacing="16">
+            <Border Width="260" Height="260"
+                    CornerRadius="18"
+                    Background="{ThemeResource WmAccentSoftBrush}"
+                    BorderBrush="{ThemeResource WmCardBrush}"
                     BorderThickness="1">
-                <FontIcon Glyph="&#xEC4F;" FontSize="72" Foreground="{ThemeResource WmAccentBrush}" />
+                <FontIcon Glyph="&#xEC4F;" FontSize="84" Foreground="{ThemeResource WmAccentBrush}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
 
             <TextBlock Text="{x:Bind Player.Title, Mode=OneWay}"
-                       FontSize="19"
+                       FontSize="20"
                        FontWeight="SemiBold"
                        TextTrimming="CharacterEllipsis"
                        HorizontalAlignment="Center" />
             <TextBlock Text="{x:Bind Player.Artist, Mode=OneWay}"
                        FontSize="13"
-                       Opacity="0.7"
+                       Opacity="0.65"
                        TextTrimming="CharacterEllipsis"
-                       HorizontalAlignment="Center" />
+                       HorizontalAlignment="Center"
+                       Margin="0,-8,0,0" />
 
-            <Canvas x:Name="SpectrumCanvas" Height="56" Margin="0,8,0,0" />
+            <Canvas x:Name="SpectrumCanvas" Height="56" Margin="0,6,0,0" />
 
             <Slider x:Name="ProgressSlider"
                     Minimum="0"
@@ -42,30 +44,35 @@
                     StepFrequency="0.5"
                     IsThumbToolTipEnabled="False" />
 
-            <Grid>
-                <TextBlock x:Name="PosText" Text="00:00" FontSize="12" Opacity="0.75" />
-                <TextBlock x:Name="DurText" Text="00:00" FontSize="12" Opacity="0.75" HorizontalAlignment="Right" />
+            <Grid Margin="0,-10,0,0">
+                <TextBlock x:Name="PosText" Text="00:00" FontSize="12" Opacity="0.7" />
+                <TextBlock x:Name="DurText" Text="00:00" FontSize="12" Opacity="0.7" HorizontalAlignment="Right" />
             </Grid>
 
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10" Margin="0,6,0,0">
-                <Button x:Name="PrevBtn" Width="42" Height="42" Padding="0" Background="Transparent" BorderThickness="0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,2,0,0">
+                <Button x:Name="PrevBtn" Width="42" Height="42" CornerRadius="21" Padding="0"
+                        Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="上一曲">
                     <FontIcon Glyph="&#xE892;" FontSize="16" />
                 </Button>
-                <Button x:Name="PlayPauseBtn" Width="54" Height="54" Padding="0">
+                <Button x:Name="PlayPauseBtn" Width="56" Height="56" CornerRadius="28" Padding="0"
+                        Background="{ThemeResource WmAccentBrush}" Foreground="White" BorderThickness="0"
+                        ToolTipService.ToolTip="播放 / 暂停">
                     <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" FontSize="20" />
                 </Button>
-                <Button x:Name="NextBtn" Width="42" Height="42" Padding="0" Background="Transparent" BorderThickness="0">
+                <Button x:Name="NextBtn" Width="42" Height="42" CornerRadius="21" Padding="0"
+                        Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="下一曲">
                     <FontIcon Glyph="&#xE893;" FontSize="16" />
                 </Button>
-                <Button x:Name="ModeBtn" Content="{x:Bind Player.ModeText, Mode=OneWay}" Padding="10,6" />
-                <Button x:Name="FavBtn" Width="42" Height="42" Padding="0" Background="Transparent" BorderThickness="0">
+                <Button x:Name="ModeBtn" Content="{x:Bind Player.ModeText, Mode=OneWay}" Padding="12,6" CornerRadius="14" />
+                <Button x:Name="FavBtn" Width="42" Height="42" CornerRadius="21" Padding="0"
+                        Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="喜欢">
                     <FontIcon Glyph="&#xEB51;" FontSize="17" />
                 </Button>
             </StackPanel>
         </StackPanel>
 
-        <!-- ===== right: lyrics ===== -->
-        <Grid Grid.Column="1" Padding="24,28">
+        <!-- ===== 右：歌词 ===== -->
+        <Grid Grid.Column="1" Padding="28,32,40,28" BorderBrush="{ThemeResource WmCardBrush}" BorderThickness="1,0,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -75,13 +82,13 @@
             <Grid Grid.Row="0">
                 <TextBlock Text="歌词" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
-                    <Button x:Name="SlowerBtn" Content="−0.5s" Padding="8,5" />
-                    <Button x:Name="FasterBtn" Content="+0.5s" Padding="8,5" />
-                    <Button x:Name="ResetBtn" Content="重置" Padding="8,5" />
+                    <Button x:Name="SlowerBtn" Content="−0.5s" Padding="10,5" CornerRadius="12" />
+                    <Button x:Name="FasterBtn" Content="+0.5s" Padding="10,5" CornerRadius="12" />
+                    <Button x:Name="ResetBtn" Content="重置" Padding="10,5" CornerRadius="12" />
                     <TextBlock x:Name="OffsetText"
                                Text="偏移 0 ms"
                                FontSize="12"
-                               Opacity="0.7"
+                               Opacity="0.6"
                                VerticalAlignment="Center"
                                Margin="8,0,0,0" />
                 </StackPanel>
@@ -107,7 +114,7 @@
             <TextBlock Grid.Row="2"
                        Margin="0,10,0,0"
                        FontSize="11.5"
-                       Opacity="0.6"
+                       Opacity="0.55"
                        TextWrapping="Wrap">
                 点击任意一行即可跳转到该时间点。没有歌词时，把与音乐文件同名的 .lrc 放在同一目录（或 lyrics 子目录）即可自动加载；用 ±0.5s 可微调整体偏移。
             </TextBlock>

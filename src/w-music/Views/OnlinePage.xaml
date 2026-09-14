@@ -7,7 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="28,20,28,16" RowSpacing="12">
+    <Grid Padding="28,20,28,16" RowSpacing="12" Background="{ThemeResource WmBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -19,8 +19,8 @@
         <Border Grid.Row="0"
                 CornerRadius="10"
                 Padding="20,16"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Background="{ThemeResource WmCardBrush}"
+                BorderBrush="{ThemeResource WmCardBrush}"
                 BorderThickness="1">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -70,6 +70,9 @@
                                  KeyDown="OnQueryBoxKeyDown" />
                         <Button x:Name="QqSearchButton" Content="搜索" Click="OnQqSearchClick" />
                         <ProgressRing x:Name="QqSearchRing" Width="18" Height="18" IsActive="False" />
+                        <Button x:Name="QqLoginButton" Click="OnQqLoginClick" VerticalAlignment="Center" />
+                        <TextBlock x:Name="QqLoginStatus" FontSize="12" Opacity="0.65"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="240" />
                     </StackPanel>
                     <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="QqSuggestions" Spacing="10" Margin="0,4,0,0">
@@ -101,8 +104,8 @@
                 <Border Grid.Row="1"
                         CornerRadius="10"
                         Padding="18,10"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        Background="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmCardBrush}"
                         BorderThickness="1">
                     <ListView x:Name="QqResultList"
                               SelectionMode="Single"
@@ -210,8 +213,8 @@
                 <Border Grid.Row="1"
                         CornerRadius="10"
                         Padding="18,10"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        Background="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmCardBrush}"
                         BorderThickness="1">
                     <ListView x:Name="Net24ResultList"
                               SelectionMode="Single"
@@ -247,7 +250,7 @@
                                             <DataTemplate x:DataType="local:QualityChipItem">
                                                 <Button Click="OnQualityChipClick" Tag="{x:Bind Key}"
                                                         CornerRadius="12" Padding="12,4" FontSize="12"
-                                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                                        Background="{ThemeResource WmChipBrush}"
                                                         ToolTipService.ToolTip="先查询这个音质档的真实大小，确认后再下载">
                                                     <StackPanel Orientation="Horizontal" Spacing="5">
                                                         <FontIcon Glyph="&#xE896;" FontSize="12" />
@@ -287,8 +290,8 @@
                 <Border Grid.Row="1"
                         CornerRadius="10"
                         Padding="18,10"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        Background="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmCardBrush}"
                         BorderThickness="1">
                     <Grid RowSpacing="8">
                         <Grid.RowDefinitions>

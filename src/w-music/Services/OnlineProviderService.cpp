@@ -375,7 +375,16 @@ namespace wm::app
             out.status = static_cast<int>(response.StatusCode());
             if (response.Content() != nullptr)
             {
-                out.body = winrt::to_string(response.Content().ReadAsStringAsync().get());
+                // Read the body as raw bytes: the QR login image and the vkey
+                // payloads are binary; a charset-based string read would mangle
+                // them. Text responses are UTF-8 so this round-trips as-is.
+                auto buffer = response.Content().ReadAsBufferAsync().get();
+                if (buffer != nullptr && buffer.Length() > 0)
+                {
+                    out.body.assign(
+                        reinterpret_cast<char const*>(buffer.data()),
+                        static_cast<std::size_t>(buffer.Length()));
+                }
             }
             for (auto const& header : response.Headers())
             {

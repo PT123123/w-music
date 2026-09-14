@@ -98,6 +98,28 @@ namespace wm::core
             return text;
         }
 
+        /// Splits |text| on every occurrence of |delim|, dropping empties.
+        std::vector<std::string> SplitOn(std::string const& text, char delim)
+        {
+            std::vector<std::string> out;
+            std::size_t start = 0;
+            while (true)
+            {
+                std::size_t const pos = text.find(delim, start);
+                if (pos == std::string::npos)
+                {
+                    out.push_back(text.substr(start));
+                    break;
+                }
+                if (pos > start)
+                {
+                    out.push_back(text.substr(start, pos - start));
+                }
+                start = pos + 1;
+            }
+            return out;
+        }
+
         /// UTF-8 aware "loose key" normalisation replicated from Net24Api.norm:
         /// case / punctuation / whitespace insensitive so the two catalogues
         /// line up on the same song. ASCII punctuation and the CJK punctuation
@@ -270,6 +292,10 @@ namespace wm::core
             { "Referer", referer },
             { "Accept", "*/*" },
         };
+        if (!m_session.empty())
+        {
+            request.headers["Cookie"] = m_session;
+        }
         HttpResponse const response = m_fetch(request);
         return response.body;   // error bodies are parsed too, like a-music
     }
@@ -387,8 +413,8 @@ namespace wm::core
                 vkeyParam["guid"] = json::Value{ std::string(kGuid) };
                 vkeyParam["songmid"] = json::Value{ std::move(songMids) };
                 vkeyParam["songtype"] = json::Value{ std::move(songTypes) };
-                vkeyParam["uin"] = json::Value{ std::string("0") };
-                vkeyParam["loginflag"] = json::Value(1);
+                vkeyParam["uin"] = json::Value{ m_uin.empty() ? std::string("0") : m_uin };
+                vkeyParam["loginflag"] = json::Value(m_uin.empty() ? 1 : 0);
                 vkeyParam["platform"] = json::Value{ std::string("20") };
 
                 json::Object req0;
@@ -423,6 +449,299 @@ namespace wm::core
             return purl;
         }
         return StrPath(*rootValue, "req_0.data.sip[0]") + purl;
+    }
+
+    std::string QqSource::Lyric(std::string const& mid) const
+    {
+        if (mid.empty())
+        {
+            return {};
+        }
+
+        // nobase64=1 makes the endpoint return plain LRC instead of the base64
+        // payload, so no decoding is needed on our side.
+        std::string const url = std::string(kLyricEndpoint) +
+            "?songmid=" + UrlEncode(mid) +
+            "&g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&nobase64=1";
+        std::string const body = HttpGet(url, kReferer);
+        if (body.empty())
+        {
+            return {};
+        }
+
+        auto root = json::Parse(body);
+        if (!root)
+        {
+            return {};
+        }
+        std::string const lyric = StrPath(*root, "lyric");
+        if (lyric.empty())
+        {
+            // Some responses carry the payload under "lyric" only; an empty
+            // string means the song simply has no lyric.
+            return {};
+        }
+        return lyric;
+    }
+
+    // =====================================================================
+    // == QQ 音乐 网页版扫码登录                                           ==
+    // =====================================================================
+
+    namespace
+    {
+        /// Splits a raw "k=v; k=v" cookie string into its individual pairs.
+        std::vector<std::pair<std::string, std::string>> SplitCookies(std::string const& text)
+        {
+            std::vector<std::pair<std::string, std::string>> out;
+            for (std::string const& part : SplitOn(text, ';'))
+            {
+                std::string const trimmed = TrimCopy(part);
+                if (trimmed.empty())
+                {
+                    continue;
+                }
+                std::size_t const eq = trimmed.find('=');
+                if (eq == std::string::npos)
+                {
+                    continue;
+                }
+                std::string const key = TrimCopy(trimmed.substr(0, eq));
+                std::string const value = TrimCopy(trimmed.substr(eq + 1));
+                if (!key.empty())
+                {
+                    out.emplace_back(key, value);
+                }
+            }
+            return out;
+        }
+
+        /// Joins cookie pairs into a "k=v; k=v" string.
+        std::string JoinCookies(std::vector<std::pair<std::string, std::string>> const& pairs)
+        {
+            std::string out;
+            for (auto const& [key, value] : pairs)
+            {
+                if (!out.empty())
+                {
+                    out += "; ";
+                }
+                out += key + "=" + value;
+            }
+            return out;
+        }
+
+        /// Extracts the leading key=value token of a complete Set-Cookie line
+        /// ("p_skey=abc; Path=/; HttpOnly" -> "p_skey=abc").
+        void AppendSetCookieValue(std::string const& line,
+                                  std::vector<std::pair<std::string, std::string>>& out)
+        {
+            std::string const trimmed = TrimCopy(line);
+            if (trimmed.empty())
+            {
+                return;
+            }
+            std::size_t const semi = trimmed.find(';');
+            std::string const pair = TrimCopy(semi == std::string::npos ? trimmed : trimmed.substr(0, semi));
+            std::size_t const eq = pair.find('=');
+            if (eq == std::string::npos)
+            {
+                return;
+            }
+            out.emplace_back(TrimCopy(pair.substr(0, eq)), TrimCopy(pair.substr(eq + 1)));
+        }
+
+        /// The canonical u1 this flow logs in through (the web player's target).
+        char const* const kU1 =
+            "https%3A%2F%2Fy.qq.com%2Fportal%2Fwplayer.html";
+
+        /// Extracts the QQ account number from a cookie set. The ptlogin
+        /// "uin" cookie is stored as "o1234567" (leading 'o').
+        std::string ExtractQqUin(std::string const& cookie)
+        {
+            for (auto const& [key, value] : SplitCookies(cookie))
+            {
+                if (key == "uin")
+                {
+                    return !value.empty() && value[0] == 'o' ? value.substr(1) : value;
+                }
+            }
+            return {};
+        }
+    } // namespace
+
+    QqLoginFlow::QqLoginFlow(FetchFn fetch) : m_fetch(std::move(fetch))
+    {
+    }
+
+    std::map<std::string, std::string> QqLoginFlow::RequestHeaders()
+    {
+        return {
+            { "User-Agent", kUa },
+            { "Referer", "https://y.qq.com/" },
+            { "Accept", "*/*" },
+        };
+    }
+
+    std::string QqLoginFlow::HttpGet(std::string const& url) const
+    {
+        HttpRequest request;
+        request.url = url;
+        request.method = "GET";
+        request.headers = RequestHeaders();
+        if (!m_cookies.empty())
+        {
+            request.headers["Cookie"] = m_cookies;
+        }
+        HttpResponse const response = m_fetch(request);
+        // Fold any new cookies back in (the success poll returns the session).
+        // A single header entry may carry several newline-separated
+        // Set-Cookie values when the transport merged them.
+        for (auto const& [name, value] : response.headers)
+        {
+            if (_stricmp(name.c_str(), "set-cookie") != 0)
+            {
+                continue;
+            }
+            for (std::string const& line : SplitOn(value, '\n'))
+            {
+                std::vector<std::pair<std::string, std::string>> current = SplitCookies(m_cookies);
+                AppendSetCookieValue(line, current);
+                m_cookies = JoinCookies(current);
+            }
+        }
+        return response.body;
+    }
+
+    std::string QqLoginFlow::Hash33(std::string const& qrsig)
+    {
+        // Mirrors the web player's hash33:
+        //   n = (n * 33 + charCode) & 0x7fffffff
+        std::int64_t n = 0;
+        for (unsigned char const c : qrsig)
+        {
+            n = ((n << 5) + n + c) & 0x7FFFFFFF;
+        }
+        return std::to_string(n);
+    }
+
+    QqLoginContext QqLoginFlow::FetchQr() const
+    {
+        QqLoginContext ctx;
+        HttpRequest request;
+        request.url = kQrUrl;
+        request.method = "GET";
+        request.headers = RequestHeaders();
+        HttpResponse const response = m_fetch(request);
+        if (response.status == 0 || response.body.empty())
+        {
+            ctx.reason = response.status == 0
+                ? "\xE7\xBD\x91\xE7\xBB\x9C\xE5\xBC\x82\xE5\xB8\xB8"   // 网络异常
+                : "\xE6\x9C\xAA\xE8\x8E\xB7\xE5\x8F\x96\xE5\x88\xB0\xE4\xBA\x8C\xE7\xBB\xB4\xE7\xA0\x81\xE5\x9B\xBE\xE7\x89\x87"; // 未获取到二维码图片
+            return ctx;
+        }
+        ctx.qrImage = response.body;
+
+        std::string qrsig;
+        for (auto const& [name, value] : response.headers)
+        {
+            if (_stricmp(name.c_str(), "set-cookie") != 0)
+            {
+                continue;
+            }
+            for (std::string const& line : SplitOn(value, '\n'))
+            {
+                std::string const lowered = ToLower(line);
+                const std::size_t pos = lowered.find("qrsig=");
+                if (pos == std::string::npos)
+                {
+                    continue;
+                }
+                std::size_t end = line.find(';', pos);
+                if (end == std::string::npos)
+                {
+                    end = line.size();
+                }
+                qrsig = line.substr(pos + 6, end - pos - 6);
+                break;
+            }
+            if (!qrsig.empty())
+            {
+                break;
+            }
+        }
+        if (qrsig.empty())
+        {
+            ctx.reason = "\xE6\x9C\xAA\xE8\x8E\xB7\xE5\x8F\x96\xE5\x88\xB0\xE7\x99\xBB\xE5\xBD\x95\xE4\xBC\x9A\xE8\xAF\x9D"; // 未获取到登录会话
+            return ctx;
+        }
+        ctx.ok = true;
+        ctx.qrsig = qrsig;
+        ctx.ptqrtoken = Hash33(qrsig);
+        m_cookies = "qrsig=" + qrsig;
+        return ctx;
+    }
+
+    QqLoginResult QqLoginFlow::CheckStatus(QqLoginContext const& context) const
+    {
+        QqLoginResult result;
+        if (!context.ok || context.qrsig.empty())
+        {
+            result.status = QqLoginStatus::Failed;
+            result.reason = "\xE5\x85\x88\xE8\x8E\xB7\xE5\x8F\x96\xE4\xBA\x8C\xE7\xBB\xB4\xE7\xA0\x81"; // 先获取二维码
+            return result;
+        }
+
+        m_cookies = "qrsig=" + context.qrsig;
+        std::string const url = std::string(kLoginBase) +
+            "?u1=" + kU1 +
+            "&ptqrtoken=" + context.ptqrtoken +
+            "&pt_aid=716027609&daid=383&pt_3rd_aid=100497308" +
+            "&qrsig=" + context.qrsig +
+            "&loginpt=qrlogin&aid=716027609&t=" + std::to_string(std::rand() % 10000);
+
+        std::string const body = HttpGet(url);
+        if (body.empty())
+        {
+            result.status = QqLoginStatus::Failed;
+            result.reason = "\xE8\xAF\xB7\xE6\xB1\x82\xE5\xA4\xB1\xE8\xB4\xA5"; // 请求失败
+            return result;
+        }
+
+        // Body shape: ptuiCB('code','uin','...','...','status_msg','nickname',...);
+        // code: 65 waiting, 66 scanned, 67 expired, 0 success.
+        auto const code = [&body]() -> int {
+            std::regex const pattern(R"(ptuiCB\('(\d+)')");
+            std::smatch match;
+            if (!std::regex_search(body, match, pattern) || match.size() < 2)
+            {
+                return -1;
+            }
+            return std::atoi(match[1].str().c_str());
+        }();
+
+        if (code == 65)
+        {
+            result.status = QqLoginStatus::Waiting;
+        }
+        else if (code == 66)
+        {
+            result.status = QqLoginStatus::Scanned;
+        }
+        else if (code == 0)
+        {
+            result.status = QqLoginStatus::Success;
+            result.cookie = m_cookies;
+            result.uin = ExtractQqUin(m_cookies);
+        }
+        else
+        {
+            result.status = QqLoginStatus::Failed;
+            result.reason = code == 67
+                ? "\xE4\xBA\x8C\xE7\xBB\xB4\xE7\xA0\x81\xE5\xB7\xB2\xE8\xBF\x87\xE6\x9C\x9F"   // 二维码已过期
+                : "\xE7\x99\xBB\xE5\xBD\x95\xE5\xA4\xB1\xE8\xB4\xA5";
+        }
+        return result;
     }
 
     // =====================================================================

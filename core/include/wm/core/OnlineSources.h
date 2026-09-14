@@ -74,6 +74,22 @@ namespace wm::core
         /// track is not freely available (VIP-only, taken down...).
         std::string DirectUrl(std::string const& mid) const;
 
+        /// Fetches the LRC lyric text for |mid| (already de-base64'd by the
+        /// endpoint when nobase64=1). Returns "" when the song has no lyric.
+        std::string Lyric(std::string const& mid) const;
+
+        /// Installs the login cookie set produced by QqLoginFlow (a
+        /// "k1=v1; k2=v2" string) together with the logged-in QQ number. All
+        /// subsequent requests carry the cookie; |uin| is forwarded into the
+        /// vkey lookup so the CDN can honour the account's entitlements.
+        void SetSession(std::string const& cookie, std::string const& uin = {})
+        {
+            m_session = cookie;
+            m_uin = uin;
+        }
+        std::string const& Session() const noexcept { return m_session; }
+        std::string const& Uin() const noexcept { return m_uin; }
+
         /// Headers the downloader must send when pulling audio off QQ's CDN.
         static std::map<std::string, std::string> DownloadHeaders();
 
@@ -89,10 +105,96 @@ namespace wm::core
             "https://c.y.qq.com/soso/fcgi-bin/client_search_cp";
         static constexpr char const* kMusicuEndpoint =
             "https://u.y.qq.com/cgi-bin/musicu.fcg";
+        static constexpr char const* kLyricEndpoint =
+            "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg";
 
         std::string HttpGet(std::string const& url, std::string const& referer) const;
 
         FetchFn m_fetch;
+        /// Login cookie set ("k=v; k=v"), installed by QqLoginFlow.
+        std::string m_session;
+        /// Logged-in QQ account number (empty when not logged in).
+        std::string m_uin;
+    };
+
+    // =====================================================================
+    // == QQ 音乐 网页版扫码登录                                           ==
+    // =====================================================================
+    //
+    // Reproduces the QR-code login flow the QQ Music web player drives through
+    // ssl.ptlogin2.qq.com (there is no official / qq-music-api login module,
+    // so this mirrors what the site itself does). It is a pure state machine:
+    // the host feeds it an HTTP transport, calls FetchQr() to obtain the
+    // QR image, displays it, then polls CheckStatus() until the scan succeeds
+    // and hands back the login cookie set to install on a QqSource.
+
+    /// State of a QR login exchange after FetchQr() succeeds.
+    /// The |qrImage| is the bytes of the QR picture (jpg/png); |qrsig| is the
+    /// opaque session marker from the Set-Cookie response; |ptqrtoken| is the
+    /// derived token required by the polling call.
+    struct QqLoginContext
+    {
+        bool ok = false;
+        std::string qrImage;
+        std::string qrsig;
+        std::string ptqrtoken;
+        std::string reason;   // human readable failure description
+    };
+
+    /// Result of one CheckStatus() poll.
+    enum class QqLoginStatus
+    {
+        Waiting,    // 65: QR shown, not scanned yet
+        Scanned,    // 66: scanned on the phone, waiting for confirmation
+        Success,    // 0: confirmed, cookie set is available
+        Failed,     // expired (67) / network error / unknown
+    };
+
+    struct QqLoginResult
+    {
+        QqLoginStatus status = QqLoginStatus::Waiting;
+        std::string cookie;   // "k=v; k=v" -- valid when status == Success
+        std::string uin;      // logged-in QQ number when status == Success
+        std::string reason;
+    };
+
+    class QqLoginFlow
+    {
+    public:
+        explicit QqLoginFlow(FetchFn fetch);
+
+        /// Requests a fresh QR image and prepares |context| for later polls.
+        /// The caller shows |ctx.qrImage| to the user and keeps |ctx| to poll.
+        QqLoginContext FetchQr() const;
+
+        /// Polls the login result for the given context. Call repeatedly every
+        /// ~2s after showing the QR. On Success the returned cookie is ready to
+        /// install on a QqSource via QqSource::SetSession.
+        QqLoginResult CheckStatus(QqLoginContext const& context) const;
+
+        /// hash33 algorithm (the web player derives ptqrtoken from qrsig).
+        static std::string Hash33(std::string const& qrsig);
+
+        /// Browser-ish header block every ptlogin request needs.
+        static std::map<std::string, std::string> RequestHeaders();
+
+    private:
+        std::string HttpGet(std::string const& url) const;
+
+        static constexpr char const* kUa =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+        static constexpr char const* kQrUrl =
+            "https://ssl.ptlogin2.qq.com/ptqrshow"
+            "?appid=716027609&e=2&l=M&s=3&d=72&v=4&t=0.1"
+            "&daid=383&pt_3rd_aid=100497308"
+            "&u1=https%3A%2F%2Fy.qq.com%2Fportal%2Fwplayer.html";
+        static constexpr char const* kLoginBase =
+            "https://ssl.ptlogin2.qq.com/ptqrlogin";
+
+        FetchFn m_fetch;
+        /// Accumulated Set-Cookie values while a login exchange is in flight.
+        mutable std::string m_cookies;
     };
 
     // =====================================================================

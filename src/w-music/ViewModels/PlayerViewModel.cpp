@@ -5,8 +5,12 @@
 
 #include "Models/LyricLineItem.h"
 #include "Services/AppPaths.h"
+#include "Services/DiscoverSettings.h"
 #include "Services/LibraryService.h"
+#include "Services/OnlineProviderService.h"
 #include "Services/Services.h"
+
+#include <wm/core/OnlineSources.h>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -45,6 +49,12 @@ namespace winrt::w_music::implementation
         std::string IdOf(hstring const& value)
         {
             return wm::app::Utf8(std::wstring_view{ value.c_str(), value.size() });
+        }
+
+        bool StartsWith(std::string const& text, char const* prefix)
+        {
+            std::size_t const n = std::strlen(prefix);
+            return text.size() >= n && text.compare(0, n, prefix) == 0;
         }
     } // namespace
 
@@ -271,6 +281,18 @@ namespace winrt::w_music::implementation
             co_await LoadLyricAsync(track.Id());
             wm::app::Library().MarkPlayed(track.Id());
         }
+        else
+        {
+            // QQ online previews have a resolvable mid baked into their id; pull
+            // the LRC from QQ when logged in (or through the public endpoint) so
+            // the now-playing lyrics highlight works without a local file.
+            std::string const mid = QqMidFromTrack(track.Id());
+            if (!mid.empty())
+            {
+                co_await winrt::resume_background();
+                LoadOnlineLyric(mid);
+            }
+        }
     }
 
     // --------------------------------------------------------------- getters
@@ -399,15 +421,64 @@ namespace winrt::w_music::implementation
     IAsyncAction PlayerViewModel::LoadLyricAsync(hstring trackId)
     {
         const hstring text = co_await wm::app::Library().LoadLyricTextAsync(trackId);
+        ApplyLyricText(wm::app::Utf8(std::wstring_view{ text.c_str(), text.size() }));
+    }
 
+    std::string PlayerViewModel::QqMidFromTrack(hstring const& trackId)
+    {
+        std::string const id = IdOf(trackId);
+        constexpr char const* kPrefix = "online:qq:";
+        if (!StartsWith(id, kPrefix))
+        {
+            return {};
+        }
+        std::string mid = id.substr(std::strlen(kPrefix));
+        constexpr char const* kSuffix = ":preview";
+        if (mid.size() >= std::strlen(kSuffix) &&
+            mid.compare(mid.size() - std::strlen(kSuffix), std::strlen(kSuffix), kSuffix) == 0)
+        {
+            mid.erase(mid.size() - std::strlen(kSuffix));
+        }
+        return mid;
+    }
+
+    void PlayerViewModel::LoadOnlineLyric(std::string const& mid)
+    {
+        if (mid.empty())
+        {
+            return;
+        }
+        try
+        {
+            wm::core::QqSource source{ wm::app::Online().Transport() };
+            auto& settings = wm::app::Settings();
+            if (settings.QqLoggedIn())
+            {
+                source.SetSession(
+                    wm::app::Utf8(std::wstring_view{ settings.QqSessionCookie().c_str(), settings.QqSessionCookie().size() }),
+                    wm::app::Utf8(std::wstring_view{ settings.QqUin().c_str(), settings.QqUin().size() }));
+            }
+            std::string const lyric = source.Lyric(mid);
+            if (!lyric.empty())
+            {
+                ApplyLyricText(lyric);
+            }
+        }
+        catch (...)
+        {
+            // Lyrics are decorative: never let a fetch failure break playback.
+        }
+    }
+
+    void PlayerViewModel::ApplyLyricText(std::string const& text)
+    {
         m_lyrics.Clear();
         m_lyric = wm::core::LyricDocument{};
         m_activeLyricIndex = -1;
 
         if (!text.empty())
         {
-            m_lyric = wm::core::LyricParser::Parse(
-                wm::app::Utf8(std::wstring_view{ text.c_str(), text.size() }));
+            m_lyric = wm::core::LyricParser::Parse(text);
 
             if (m_lyric.valid)
             {

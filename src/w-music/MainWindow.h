@@ -3,6 +3,7 @@
 #include "MainWindow.g.h"
 
 #include "Controls/SpectrumView.h"
+#include "Services/TrayIcon.h"
 
 namespace winrt::w_music::implementation
 {
@@ -15,6 +16,7 @@ namespace winrt::w_music::implementation
 
     private:
         void OnLoaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnWindowClosed(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::WindowEventArgs const& args);
         void OnNavigationSelectionChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender,
                                           winrt::Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const& args);
         void OnPlayPauseClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -35,6 +37,7 @@ namespace winrt::w_music::implementation
         void UpdateSpectrum(std::vector<double> const& bars);
 
         wm::app::SpectrumView m_spectrumView;
+        wm::app::TrayIcon m_trayIcon;
         bool m_updatingSlider = false;
     };
 }
