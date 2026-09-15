@@ -41,6 +41,12 @@ namespace wm::app
         std::wstring Net24BaseUrl() const noexcept { return m_net24BaseUrl; }
         void Net24BaseUrl(std::wstring const& value);
 
+        /// 界面主题 id（qq / ocean / sunset / galaxy / sakura）。这个文件在实践中
+        /// 是应用级的 settings.json，界面偏好也塞在这里，省得再开一个文件。
+        /// 未知 / 空值一律回落到 qq —— 由 MainWindow::ApplyTheme 负责解析。
+        std::wstring UiTheme() const noexcept { return m_uiTheme; }
+        void UiTheme(std::wstring const& value);
+
         /// QQ 音乐扫码登录态（持久化，供播放/歌词复用）。
         std::wstring QqSessionCookie() const noexcept { return m_qqSessionCookie; }
         std::wstring QqUin() const noexcept { return m_qqUin; }
@@ -57,6 +63,7 @@ namespace wm::app
         std::wstring m_discoverSource{ SourceQq() };
         std::vector<std::wstring> m_searchHistory;
         std::wstring m_net24BaseUrl;
+        std::wstring m_uiTheme{ L"qq" };
         std::wstring m_qqSessionCookie;
         std::wstring m_qqUin;
     };

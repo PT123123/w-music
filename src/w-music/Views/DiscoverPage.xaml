@@ -7,14 +7,17 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource WmBgBrush}">
+    <!-- 页面背景一律透明：整窗那一层主题渐变（MainWindow 的 RootHost）直接透过来 -->
+    <Grid Background="Transparent">
         <ScrollViewer>
             <StackPanel Padding="28,20,28,28" Spacing="24">
 
-                <!-- ===== 顶部横幅（QQ 音乐风格） ===== -->
+                <!-- ===== 顶部横幅（QQ 音乐风格）：薄白玻璃，叠在主题渐变上 ===== -->
                 <Border CornerRadius="14"
                         Padding="28,24"
-                        Background="{ThemeResource WmAccentGradientBrush}">
+                        BorderBrush="{ThemeResource WmBorderBrush}"
+                        BorderThickness="1"
+                        Background="{ThemeResource WmHeroGradientBrush}">
                     <StackPanel Spacing="10">
                         <TextBlock Text="发现音乐"
                                    FontSize="30"
@@ -43,7 +46,7 @@
                                         QueryIcon="Find"
                                         MaxWidth="520"
                                         HorizontalAlignment="Left"
-                                        Background="#F2FFFFFF"
+                                        Background="#26FFFFFF"
                                         Margin="0,10,0,0" />
                     </StackPanel>
                 </Border>
@@ -65,7 +68,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" CornerRadius="10"
                                             Background="{ThemeResource WmCardBrush}"
-                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderBrush="{ThemeResource WmBorderBrush}"
                                             BorderThickness="1">
                                         <Grid>
                                             <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
@@ -112,7 +115,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" CornerRadius="10"
                                             Background="{ThemeResource WmCardBrush}"
-                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderBrush="{ThemeResource WmBorderBrush}"
                                             BorderThickness="1">
                                         <Grid>
                                             <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
@@ -159,7 +162,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" CornerRadius="10"
                                             Background="{ThemeResource WmCardBrush}"
-                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderBrush="{ThemeResource WmBorderBrush}"
                                             BorderThickness="1">
                                         <Grid>
                                             <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
@@ -206,7 +209,7 @@
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" CornerRadius="10"
                                             Background="{ThemeResource WmCardBrush}"
-                                            BorderBrush="{ThemeResource WmHoverBrush}"
+                                            BorderBrush="{ThemeResource WmBorderBrush}"
                                             BorderThickness="1">
                                         <Grid>
                                             <FontIcon Glyph="&#xEC4F;" FontSize="28" Foreground="{ThemeResource WmAccentBrush}"
