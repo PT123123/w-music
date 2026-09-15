@@ -7,7 +7,7 @@
 #   just build   compile (SDK + WinUI projection -> IDL -> cppwinrt -> ninja)
 #   just fast    compile only, reusing the generated projections (inner loop)
 #   just test    run the core test binaries
-#   just run     full loop: build, then test
+#   just run     launch the app GUI (run only -- no build)
 #   just clean   delete build\  (full regeneration next time, ~2 min)
 #
 # `just --list` prints every recipe.  Set up once: just must be on PATH.
@@ -49,21 +49,17 @@ test:
         & $exe.FullName
     }
 
-# Full loop: build, then run the core tests.
+# Launch the app GUI. Run only -- no build; use 'just build' first if needed.
 run:
     #!pwsh -NoProfile
     $ErrorActionPreference = 'Stop'
-    $PSNativeCommandUseErrorActionPreference = $true
-    & '{{driver}}'
-
-# Launch the app GUI (build first if the exe is missing).
-launch:
-    #!pwsh -NoProfile
-    $ErrorActionPreference = 'Stop'
     $exe = '{{build_dir}}\w-music.exe'
-    if (-not (Test-Path $exe)) { & '{{driver}}' -NoTests }
+    if (-not (Test-Path $exe)) { throw "w-music.exe not found in {{build_dir}} -- run 'just build' first" }
     Start-Process -FilePath $exe
     Write-Host 'w-music launched.'
+
+# Alias of run.
+alias launch := run
 
 # Force the C++/WinRT projections to regenerate, then build.
 gen:
