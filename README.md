@@ -45,8 +45,8 @@ just                    # 列出全部 recipe
 just build              # 全量：投影 → IDL → cppwinrt → build.ninja → ninja（不跑单测）
 just fast               # 复用已生成的投影，只重编（改 .cpp 时的内循环）
 just test               # 跑 core 单测
-just run                # 全量构建 + 跑单测
-just launch             # 启动 build\w-music.exe（exe 不存在时先构建）
+just run                # 启动 build\w-music.exe（只运行，不构建）
+just launch             # 同 just run（别名）
 just gen                # 强制重生成 C++/WinRT 投影后再构建（改过 .idl 时用）
 just clean              # 删掉 build\（下次全量重生成，约 2 分钟）
 just clean-soft         # 只删 obj / exe / 日志，保留上千个投影头文件
@@ -72,7 +72,7 @@ just tools              # 只打印探到的工具链路径
 > 所以**不做 MSIX 打包**；XAML 由 `tools\xaml-markup.ps1` 直接驱动 XamlCompiler 生成
 > `build\gen\component\w_music\*.xaml.g.h` 与 XBF，非打包 WinUI 3 应用可正常构建运行。
 > 产物 `build\w-music.exe` 依赖已注册的 **WindowsAppRuntime 2.3.1 框架包**（引导程序找不到会弹框提示）。
-> `just run` 跑的是 core 单测，启动界面用 `just launch`。
+> `just run` 只启动界面（不构建），构建和单测分别用 `just build` / `just test`。
 
 首次启动 → 发现页点 **添加音乐文件夹** → 选你的音乐目录 → 递归扫描并读取 `MusicProperties` 元数据建库。
 
