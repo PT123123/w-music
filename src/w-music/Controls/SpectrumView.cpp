@@ -11,6 +11,33 @@ using namespace Windows::UI;
 
 namespace wm::app
 {
+    namespace
+    {
+        /// 读一支主题画刷的当前颜色。取的是 App.xaml 里那批共享实例的颜色，所以
+        /// 切主题之后重建一次频谱柱就能跟着变（见 MainWindow::ApplyTheme）。
+        Color BrushColor(wchar_t const* key, Color fallback)
+        {
+            try
+            {
+                auto value = Application::Current().Resources().Lookup(box_value(hstring{ key }));
+                if (auto brush = value.try_as<SolidColorBrush>())
+                {
+                    return brush.Color();
+                }
+            }
+            catch (...)
+            {
+            }
+            return fallback;
+        }
+
+        std::uint8_t LerpChannel(std::uint8_t from, std::uint8_t to, double t)
+        {
+            const double value = static_cast<double>(from) + (static_cast<double>(to) - static_cast<double>(from)) * t;
+            return static_cast<std::uint8_t>(value + 0.5);
+        }
+    } // namespace
+
     void SpectrumView::Attach(Canvas const& canvas, int barCount)
     {
         Detach();
@@ -22,18 +49,23 @@ namespace wm::app
         m_canvas = canvas;
         canvas.Children().Clear();
 
+        // 频谱柱用主题强调色 -> 主题副色插值。默认值是 QQ 绿那对（主题绿）。
+        const Color start = BrushColor(L"WmAccentBrush", ColorHelper::FromArgb(0xFF, 0x31, 0xC2, 0x7C));
+        const Color end = BrushColor(L"WmAccentAltBrush", ColorHelper::FromArgb(0xFF, 0x2D, 0xD4, 0xBF));
+
         m_bars.reserve(static_cast<std::size_t>(barCount));
         for (int i = 0; i < barCount; ++i)
         {
             const double t = static_cast<double>(i) / static_cast<double>(barCount > 1 ? barCount - 1 : 1);
-            const auto r = static_cast<std::uint8_t>(0x31 + t * (0x2D - 0x31));
-            const auto g = static_cast<std::uint8_t>(0xC2 + t * (0xD4 - 0xC2));
-            const auto b = static_cast<std::uint8_t>(0x7C + t * (0xBF - 0x7C));
+            const Color colour = ColorHelper::FromArgb(0xDD,
+                                                       LerpChannel(start.R, end.R, t),
+                                                       LerpChannel(start.G, end.G, t),
+                                                       LerpChannel(start.B, end.B, t));
 
             // Fully qualified: windows.h declares a global Rectangle() GDI
             // function, so the unqualified name is ambiguous (C2872).
             winrt::Microsoft::UI::Xaml::Shapes::Rectangle rect;
-            rect.Fill(SolidColorBrush{ ColorHelper::FromArgb(0xDD, r, g, b) });
+            rect.Fill(SolidColorBrush{ colour });
             rect.RadiusX(1.5);
             rect.RadiusY(1.5);
             rect.Height(2.0);

@@ -7,7 +7,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource WmBgBrush}">
+    <!-- 页面背景一律透明，露出 MainWindow 根节点的主题渐变 -->
+    <Grid Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="228" />
             <ColumnDefinition Width="*" />
@@ -16,7 +17,7 @@
         <!-- ===== 左侧：歌单 ===== -->
         <Border Grid.Column="0"
                 Background="{ThemeResource WmSideBrush}"
-                BorderBrush="{ThemeResource WmCardBrush}"
+                BorderBrush="{ThemeResource WmBorderBrush}"
                 BorderThickness="0,0,1,0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -85,8 +86,8 @@
             <!-- 标题栏 -->
             <Border Grid.Row="0"
                     Padding="24,16"
-                    Background="{ThemeResource WmBgBrush}"
-                    BorderBrush="{ThemeResource WmCardBrush}"
+                    Background="Transparent"
+                    BorderBrush="{ThemeResource WmBorderBrush}"
                     BorderThickness="0,0,0,1">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -120,7 +121,7 @@
             <Border Grid.Row="1"
                     VerticalAlignment="Top"
                     Padding="24,10"
-                    BorderBrush="{ThemeResource WmCardBrush}"
+                    BorderBrush="{ThemeResource WmBorderBrush}"
                     BorderThickness="0,0,0,1">
                 <Grid>
                     <Grid.ColumnDefinitions>

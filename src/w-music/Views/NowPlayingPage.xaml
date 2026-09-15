@@ -7,7 +7,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource WmBgBrush}">
+    <!-- 页面背景透明，露出 MainWindow 根节点的主题渐变 -->
+    <Grid Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
@@ -17,8 +18,8 @@
         <StackPanel Grid.Column="0" Padding="48,32,32,28" Spacing="16">
             <Border Width="260" Height="260"
                     CornerRadius="18"
-                    Background="{ThemeResource WmAccentSoftBrush}"
-                    BorderBrush="{ThemeResource WmCardBrush}"
+                    Background="{ThemeResource WmCardBrush}"
+                    BorderBrush="{ThemeResource WmBorderBrush}"
                     BorderThickness="1">
                 <FontIcon Glyph="&#xEC4F;" FontSize="84" Foreground="{ThemeResource WmAccentBrush}"
                           HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -54,8 +55,10 @@
                         Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="上一曲">
                     <FontIcon Glyph="&#xE892;" FontSize="16" />
                 </Button>
+                <!-- 播放键直接用主题色画在渐变背景上，绿色主题下会糊成一片，
+                     所以这里跟主按钮统一：白底 + 主题色图标 -->
                 <Button x:Name="PlayPauseBtn" Width="56" Height="56" CornerRadius="28" Padding="0"
-                        Background="{ThemeResource WmAccentBrush}" Foreground="White" BorderThickness="0"
+                        Background="#F2FFFFFF" Foreground="{ThemeResource WmAccentBrush}" BorderThickness="0"
                         ToolTipService.ToolTip="播放 / 暂停">
                     <FontIcon x:Name="PlayPauseIcon" Glyph="&#xE768;" FontSize="20" />
                 </Button>
@@ -72,7 +75,7 @@
         </StackPanel>
 
         <!-- ===== 右：歌词 ===== -->
-        <Grid Grid.Column="1" Padding="28,32,40,28" BorderBrush="{ThemeResource WmCardBrush}" BorderThickness="1,0,0,0">
+        <Grid Grid.Column="1" Padding="28,32,40,28" BorderBrush="{ThemeResource WmBorderBrush}" BorderThickness="1,0,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />

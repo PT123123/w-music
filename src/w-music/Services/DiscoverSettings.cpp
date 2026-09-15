@@ -80,6 +80,14 @@ namespace wm::app
         {
             m_net24BaseUrl = Utf16(url->asString());
         }
+        if (auto const* theme = root->Find("uiTheme"); theme != nullptr && theme->isString())
+        {
+            std::wstring const value = Utf16(theme->asString());
+            if (!value.empty())
+            {
+                m_uiTheme = value;
+            }
+        }
         if (auto const* cookie = root->Find("qqSessionCookie"); cookie != nullptr && cookie->isString())
         {
             m_qqSessionCookie = Utf16(cookie->asString());
@@ -102,6 +110,7 @@ namespace wm::app
         }
         root["searchHistory"] = wm::core::json::Value{ std::move(history) };
         root["net24BaseUrl"] = wm::core::json::Value{ Utf8(m_net24BaseUrl) };
+        root["uiTheme"] = wm::core::json::Value{ Utf8(m_uiTheme) };
         root["qqSessionCookie"] = wm::core::json::Value{ Utf8(m_qqSessionCookie) };
         root["qqUin"] = wm::core::json::Value{ Utf8(m_qqUin) };
 
@@ -182,6 +191,16 @@ namespace wm::app
             return;
         }
         m_net24BaseUrl = value;
+        Save();
+    }
+
+    void DiscoverSettings::UiTheme(std::wstring const& value)
+    {
+        if (value.empty() || m_uiTheme == value)
+        {
+            return;
+        }
+        m_uiTheme = value;
         Save();
     }
 

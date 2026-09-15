@@ -7,7 +7,11 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource WmBgBrush}">
+    <!-- RootHost 是整窗唯一一层主题渐变（垂直 上→下 的低亮度暗渐变，见 App.xaml）。
+         导航栏 / 页面 / 底部播放条全部透明，于是整块界面共用这一支连续的渐变；
+         切主题只改这一个节点的 Background（见 MainWindow::ApplyTheme）。
+         初始值给默认主题，避免启动瞬间闪一下。 -->
+    <Grid x:Name="RootHost" Background="{StaticResource WmThemeQqGradient}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -24,13 +28,13 @@
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False"
                         OpenPaneLength="208"
-                        Background="{ThemeResource WmBgBrush}">
+                        Background="Transparent">
             <NavigationView.PaneHeader>
                 <Grid Height="60">
                     <StackPanel Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
                         <Border Width="26" Height="26" CornerRadius="8"
-                                Background="{ThemeResource WmAccentBrush}">
-                            <FontIcon Glyph="&#xEC4F;" FontSize="14" Foreground="White"
+                                Background="#F2FFFFFF">
+                            <FontIcon Glyph="&#xEC4F;" FontSize="14" Foreground="{ThemeResource WmAccentBrush}"
                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Text="w-music" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -70,7 +74,7 @@
         <Border Grid.Row="2"
                 Height="92"
                 Background="{ThemeResource WmSideBrush}"
-                BorderBrush="{ThemeResource WmCardBrush}"
+                BorderBrush="{ThemeResource WmBorderBrush}"
                 BorderThickness="0,1,0,0">
             <Grid Padding="16,0">
                 <Grid.ColumnDefinitions>
@@ -82,7 +86,7 @@
                 <!-- 左：封面 + 歌名 / 歌手 / 时间 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                     <Border Width="56" Height="56" CornerRadius="10"
-                            Background="{ThemeResource WmAccentSoftBrush}">
+                            Background="{ThemeResource WmPressBrush}">
                         <FontIcon Glyph="&#xEC4F;" FontSize="22" Foreground="{ThemeResource WmAccentBrush}"
                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -146,8 +150,107 @@
                     </Grid>
                 </Grid>
 
-                <!-- 右：歌词 + 音量 -->
+                <!-- 右：主题 + 歌词 + 音量 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <!-- 主题切换：每个色块就是那个主题的渐变底色本身（直接引用
+                         App.xaml 里的同一个画刷资源），所以预览和实际界面一致。
+                         只有这里影响全局视觉，将来加主题就是加一个 Button。 -->
+                    <Button x:Name="ThemeButton" Padding="12,6" CornerRadius="14"
+                            ToolTipService.ToolTip="切换界面主题">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE790;" FontSize="14" />
+                            <TextBlock Text="主题" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="Top">
+                                <!-- 弹出层不在根节点的 RequestedTheme 作用域里，单独锁深色 -->
+                                <StackPanel Width="236" Spacing="2" RequestedTheme="Dark">
+                                    <TextBlock Text="界面主题" FontSize="15" FontWeight="SemiBold"
+                                               Margin="4,2,0,8" />
+                                    <Button Tag="qq" Click="OnThemeClick" Padding="8,6"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="40" Height="24" CornerRadius="6"
+                                                    Background="{StaticResource WmThemeQqGradient}" />
+                                            <TextBlock Grid.Column="1" Text="QQ 绿" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <FontIcon x:Name="ThemeCheckQq" Grid.Column="2" Glyph="&#xE73E;"
+                                                      FontSize="14" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Tag="ocean" Click="OnThemeClick" Padding="8,6"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="40" Height="24" CornerRadius="6"
+                                                    Background="{StaticResource WmThemeOceanGradient}" />
+                                            <TextBlock Grid.Column="1" Text="海洋蓝" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <FontIcon x:Name="ThemeCheckOcean" Grid.Column="2" Glyph="&#xE73E;"
+                                                      FontSize="14" VerticalAlignment="Center" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Tag="sunset" Click="OnThemeClick" Padding="8,6"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="40" Height="24" CornerRadius="6"
+                                                    Background="{StaticResource WmThemeSunsetGradient}" />
+                                            <TextBlock Grid.Column="1" Text="日落橙" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <FontIcon x:Name="ThemeCheckSunset" Grid.Column="2" Glyph="&#xE73E;"
+                                                      FontSize="14" VerticalAlignment="Center" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Tag="galaxy" Click="OnThemeClick" Padding="8,6"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="40" Height="24" CornerRadius="6"
+                                                    Background="{StaticResource WmThemeGalaxyGradient}" />
+                                            <TextBlock Grid.Column="1" Text="星空紫" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <FontIcon x:Name="ThemeCheckGalaxy" Grid.Column="2" Glyph="&#xE73E;"
+                                                      FontSize="14" VerticalAlignment="Center" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Tag="sakura" Click="OnThemeClick" Padding="8,6"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="40" Height="24" CornerRadius="6"
+                                                    Background="{StaticResource WmThemeSakuraGradient}" />
+                                            <TextBlock Grid.Column="1" Text="樱粉" FontSize="13"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            <FontIcon x:Name="ThemeCheckSakura" Grid.Column="2" Glyph="&#xE73E;"
+                                                      FontSize="14" VerticalAlignment="Center" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                     <Button x:Name="LyricButton" Content="歌词" Padding="12,6" CornerRadius="14"
                             ToolTipService.ToolTip="打开歌词页" />
                     <FontIcon Glyph="&#xE767;" FontSize="14" Opacity="0.7" VerticalAlignment="Center" />
