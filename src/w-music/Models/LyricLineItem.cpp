@@ -10,12 +10,34 @@ namespace winrt::w_music::implementation
         using namespace winrt::Microsoft::UI::Xaml::Media;
         using namespace winrt::Windows::UI;
 
+        /// 当前主题的强调色画刷（App.xaml 的 WmAccentBrush）。这里刻意复用共享
+        /// 实例而不是新建一支：MainWindow::ApplyTheme 改的就是这支画刷的 Color，
+        /// 于是正在显示的高亮歌词行会跟着换色，不用重建歌词列表。
+        SolidColorBrush AccentBrush()
+        {
+            try
+            {
+                auto value = winrt::Microsoft::UI::Xaml::Application::Current().Resources()
+                                 .Lookup(winrt::box_value(winrt::hstring{ L"WmAccentBrush" }));
+                if (auto brush = value.try_as<SolidColorBrush>())
+                {
+                    return brush;
+                }
+            }
+            catch (...)
+            {
+                // 取不到（比如不在 UI 线程）就退回默认绿。
+            }
+            return SolidColorBrush{ ColorHelper::FromArgb(0xFF, 0x31, 0xC2, 0x7C) };
+        }
+
         SolidColorBrush MakeForeground(bool active)
         {
-            const Color colour = active
-                ? ColorHelper::FromArgb(0xFF, 0x31, 0xC2, 0x7C)
-                : ColorHelper::FromArgb(0x99, 0xFF, 0xFF, 0xFF);
-            return SolidColorBrush{ colour };
+            if (active)
+            {
+                return AccentBrush();
+            }
+            return SolidColorBrush{ ColorHelper::FromArgb(0x99, 0xFF, 0xFF, 0xFF) };
         }
     } // namespace
 

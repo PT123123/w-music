@@ -7,7 +7,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="28,20,28,16" RowSpacing="12" Background="{ThemeResource WmBgBrush}">
+    <!-- 页面背景透明：整窗主题渐变直接透过来，面板用半透明玻璃叠在上面 -->
+    <Grid Padding="28,20,28,16" RowSpacing="12" Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -20,7 +21,7 @@
                 CornerRadius="10"
                 Padding="20,16"
                 Background="{ThemeResource WmCardBrush}"
-                BorderBrush="{ThemeResource WmCardBrush}"
+                BorderBrush="{ThemeResource WmBorderBrush}"
                 BorderThickness="1">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -105,7 +106,7 @@
                         CornerRadius="10"
                         Padding="18,10"
                         Background="{ThemeResource WmCardBrush}"
-                        BorderBrush="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmBorderBrush}"
                         BorderThickness="1">
                     <ListView x:Name="QqResultList"
                               SelectionMode="Single"
@@ -214,7 +215,7 @@
                         CornerRadius="10"
                         Padding="18,10"
                         Background="{ThemeResource WmCardBrush}"
-                        BorderBrush="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmBorderBrush}"
                         BorderThickness="1">
                     <ListView x:Name="Net24ResultList"
                               SelectionMode="Single"
@@ -291,7 +292,7 @@
                         CornerRadius="10"
                         Padding="18,10"
                         Background="{ThemeResource WmCardBrush}"
-                        BorderBrush="{ThemeResource WmCardBrush}"
+                        BorderBrush="{ThemeResource WmBorderBrush}"
                         BorderThickness="1">
                     <Grid RowSpacing="8">
                         <Grid.RowDefinitions>

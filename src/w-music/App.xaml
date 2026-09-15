@@ -39,20 +39,78 @@
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             </Style>
 
-            <!-- 顶部横幅渐变（发现页） -->
-            <LinearGradientBrush x:Key="WmAccentGradientBrush" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Offset="0" Color="#FF3CCE92" />
-                <GradientStop Offset="1" Color="#FF17A05E" />
+            <!-- =============================================================
+                 主题渐变底色 —— 垂直（上→下）低亮度暗色渐变
+                 =============================================================
+                 风格规范（五套主题共用同一条规则，换色时照这个抄）：
+
+                   · 方向：**垂直**，从上到下。StartPoint="0,0" EndPoint="0,1"。
+                     不是对角、不是径向。
+                   · 顶部 = 该色相的「暗哑版」：低亮度、低饱和，不带高光。
+                     明度基准对齐 #0F4938（暗森林墨绿）。
+                   · 底部 = 统一的深海蓝青 **#0A2442**，五套主题完全一样。
+                     色相在上半部说事，下半部归一，于是所有主题共享同一个
+                     冷色暗底，整体偏冷、低对比、暗光氛围。
+                   · 只有两个 stop。暗色长距离渐变本来就有机器条带（mach banding）
+                     风险，两点线性是最不容易带出条带的插值方式；中间再加 stop
+                     反而会在低亮度区压出可见的硬分界。
+                   · 全程不出现亮绿 / 亮蓝等高明度色。五支渐变里最亮的一个通道
+                     是星空紫的 0x85，各上端点的相对亮度都在 23%~24%（＝#0F4938
+                     的同档），底端约 13%。整块界面因此始终是低亮度暗调。
+
+                 参考（可直接复制给绘图工具）：
+                   垂直线性渐变背景，顶部暗森林墨绿色 #0F4938，平滑向下过渡到
+                   底部深海深蓝青色 #0A2442，低亮度深色模式，柔和无噪点，哑光，
+                   无纹理，纯色平滑渐变，冷色调暗 UI 界面背景。
+
+                 用法：MainWindow 的根 Grid（RootHost）直接把其中一支设成
+                 Background，所有页面 / 导航栏 / 底部播放条一律透明，于是整个
+                 窗口共用一层连续的渐变，切主题时只换根节点这一支画刷。
+
+                 新增主题 = 在这里加一支（上端点换成新色相的暗哑版，下端点仍是
+                 #0A2442），MainWindow.cpp 的 kThemes 里加一行 id + 强调色，界面
+                 里加一个色块按钮即可。色块按钮直接引用这里的画刷，预览即实际底色。 -->
+            <LinearGradientBrush x:Key="WmThemeQqGradient" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FF0F4938" />  <!-- 暗森林墨绿 -->
+                <GradientStop Offset="1" Color="#FF0A2442" />  <!-- 深海深蓝青 -->
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="WmThemeOceanGradient" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FF0E4668" />  <!-- 暗钢青 -->
+                <GradientStop Offset="1" Color="#FF0A2442" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="WmThemeSunsetGradient" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FF663217" />  <!-- 暗赭橙 -->
+                <GradientStop Offset="1" Color="#FF0A2442" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="WmThemeGalaxyGradient" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FF4E2D85" />  <!-- 暗罗兰紫 -->
+                <GradientStop Offset="1" Color="#FF0A2442" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="WmThemeSakuraGradient" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FF6B2F4A" />  <!-- 暗绛粉 -->
+                <GradientStop Offset="1" Color="#FF0A2442" />
+            </LinearGradientBrush>
+
+            <!-- 发现页顶部横幅：薄薄一层白玻璃。底色已经是暗的了，再叠暗玻璃
+                 会糊成一块脏斑，所以改用极轻的白提亮，把面板「托」起来；
+                 横幅上的标题/说明/幽灵按钮都是白字，白玻璃只有 ~15% 透明度，
+                 对比度仍然够。 -->
+            <LinearGradientBrush x:Key="WmHeroGradientBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Offset="0" Color="#26FFFFFF" />
+                <GradientStop Offset="1" Color="#0DFFFFFF" />
             </LinearGradientBrush>
 
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <!-- 品牌绿 -->
+                    <!-- 品牌绿（强调色系列的 11 个 key 会在切主题时被代码改写，
+                         见 MainWindow::ApplyTheme） -->
                     <SolidColorBrush x:Key="WmAccentBrush" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="WmAccentSoftBrush" Color="#FFE3F7EF" />
+                    <SolidColorBrush x:Key="WmAccentAltBrush" Color="#FF2DD4BF" />
                     <SolidColorBrush x:Key="WmBgBrush" Color="#FFF7F7F7" />
                     <SolidColorBrush x:Key="WmSideBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="WmCardBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="WmBorderBrush" Color="#22000000" />
                     <SolidColorBrush x:Key="WmSecondaryBrush" Color="#FF8C8C8C" />
                     <SolidColorBrush x:Key="WmHoverBrush" Color="#14000000" />
                     <SolidColorBrush x:Key="WmPressBrush" Color="#22000000" />
@@ -98,50 +156,125 @@
                     <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FF28B06E" />
                 </ResourceDictionary>
 
+                <!-- =========================================================
+                     Dark：这套是实际生效的那套（窗口根节点强制 ElementTheme.Dark，
+                     理由见 MainWindow.xaml）。所有面板都改成玻璃/半透明，让主题渐变
+                     透出来，而不是用不透明的灰块把它盖住。
+                     ========================================================= -->
                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="WmAccentBrush" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="WmAccentSoftBrush" Color="#2E31C27C" />
-                    <SolidColorBrush x:Key="WmBgBrush" Color="#FF151515" />
-                    <SolidColorBrush x:Key="WmSideBrush" Color="#FF1D1D1D" />
-                    <SolidColorBrush x:Key="WmCardBrush" Color="#FF262626" />
-                    <SolidColorBrush x:Key="WmSecondaryBrush" Color="#FF8F8F8F" />
-                    <SolidColorBrush x:Key="WmHoverBrush" Color="#14FFFFFF" />
-                    <SolidColorBrush x:Key="WmPressBrush" Color="#22FFFFFF" />
-                    <SolidColorBrush x:Key="WmChipBrush" Color="#FF2E2E2E" />
-                    <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="#FF1D1D1D" />
+                    <SolidColorBrush x:Key="WmAccentAltBrush" Color="#FF2DD4BF" />
+                    <!-- 兜底底色：页面一律透明，只有漏改的地方才会露出来。
+                         取的是主题渐变的正中（#0F4938 与 #0A2442 的中点），
+                         万一露出来也不至于突兀。 -->
+                    <SolidColorBrush x:Key="WmBgBrush" Color="#FF0D373D" />
+                    <!-- 面板：整高侧栏 / 底部播放条。压暗得太狠会在渐变上切出一条
+                         硬邦邦的分界线，所以只用 25% 黑，保持整窗渐变的连续性。 -->
+                    <SolidColorBrush x:Key="WmSideBrush" Color="#40000000" />
+                    <!-- 卡片：底色已经是暗的了，再压黑卡片会直接消失（黑叠黑），
+                         所以反过来用极轻的白玻璃把卡片「抬」起来，靠白色发丝描边定格。 -->
+                    <SolidColorBrush x:Key="WmCardBrush" Color="#1AFFFFFF" />
+                    <!-- 描边：白色发丝线 -->
+                    <SolidColorBrush x:Key="WmBorderBrush" Color="#26FFFFFF" />
+                    <!-- 次要文字：偏冷的浅灰（配冷色底不脏） -->
+                    <SolidColorBrush x:Key="WmSecondaryBrush" Color="#FFB6C4C9" />
+                    <SolidColorBrush x:Key="WmHoverBrush" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="WmPressBrush" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="WmChipBrush" Color="#33FFFFFF" />
+
+                    <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="#00000000" />
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#00000000" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#00000000" />
+                    <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="#FF31C27C" />
+                    <SolidColorBrush x:Key="ApplicationPageBackgroundThemeBrush" Color="#00000000" />
 
                     <SolidColorBrush x:Key="ButtonBackground" Color="#00FFFFFF" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#14FFFFFF" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33FFFFFF" />
                     <SolidColorBrush x:Key="ButtonBorderBrush" Color="#00FFFFFF" />
 
-                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#FF31C27C" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FF3FD48A" />
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF28B06E" />
-                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFFFF" />
+                    <!-- 主按钮 = 白色胶囊 + 主题色文字（在任意主题渐变上都醒目） -->
+                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#F2FFFFFF" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#D9FFFFFF" />
+                    <SolidColorBrush x:Key="AccentButtonForeground" Color="#FF31C27C" />
 
-                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="#FF2A2A2A" />
-                    <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#FF343434" />
-                    <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#FF3C3C3C" />
-                    <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#FF31C27C" />
-                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#FF3FD48A" />
-                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#FF28B06E" />
-                    <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackground" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#40FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#F2FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#D9FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#00FFFFFF" />
 
-                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#2E31C27C" />
-                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#FF3FD48A" />
-                    <SolidColorBrush x:Key="NavigationViewItemBackgroundPointerOver" Color="#14FFFFFF" />
+                    <!-- 导航：选中 = 白玻璃胶囊 + 白字 + 主题色指示条 -->
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#40FFFFFF" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundPointerOver" Color="#1FFFFFFF" />
                     <SolidColorBrush x:Key="NavigationViewItemForegroundPointerOver" Color="#FFFFFFFF" />
-                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#2E31C27C" />
-                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#FF3FD48A" />
+                    <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#4DFFFFFF" />
+                    <SolidColorBrush x:Key="NavigationViewItemForegroundSelectedPointerOver" Color="#FFFFFFFF" />
 
+                    <SolidColorBrush x:Key="SliderTrackFill" Color="#33FFFFFF" />
                     <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FF28B06E" />
                     <SolidColorBrush x:Key="SliderThumbBackground" Color="#FF31C27C" />
                     <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FF3FD48A" />
                     <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FF28B06E" />
+                    <SolidColorBrush x:Key="ProgressBarForeground" Color="#FF31C27C" />
+
+                    <!-- 输入框 / 下拉框：淡白玻璃。底色翻成暗色之后，原来那套
+                         "压黑"的输入框会整块隐身（黑叠黑），所以改成微微提亮的白玻璃，
+                         配合白色描边，字段边界才看得出来。
+                         文字仍然是白色（TextControlForeground = #FFFFFFFF）。 -->
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#0DFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="#2EFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#47FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#8CFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#B3FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FF31C27C" />
+
+                    <SolidColorBrush x:Key="ComboBoxBackground" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#2EFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#F2181C1F" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="#FFFFFFFF" />
+
+                    <!-- 列表项悬停 / 选中：白玻璃 -->
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#33FFFFFF" />
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#40FFFFFF" />
+                    <SolidColorBrush x:Key="ListViewItemForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ListViewItemForegroundSelected" Color="#FFFFFFFF" />
+
+                    <!-- 弹出层：几乎不透明，保证文字可读 -->
+                    <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#F2181C1F" />
+                    <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#26FFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#F2181C1F" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#1FFFFFFF" />
+                    <SolidColorBrush x:Key="ContentDialogBackground" Color="#F2181C1F" />
+                    <SolidColorBrush x:Key="ContentDialogBorderBrush" Color="#26FFFFFF" />
+
+                    <SolidColorBrush x:Key="ScrollBarThumbFill" Color="#59FFFFFF" />
+                    <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="#8CFFFFFF" />
+                    <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="#B3FFFFFF" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
