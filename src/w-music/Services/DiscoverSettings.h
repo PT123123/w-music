@@ -15,6 +15,8 @@
 
 #include "pch.h"
 
+#include <array>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -54,6 +56,19 @@ namespace wm::app
         void SetQqSession(std::wstring const& cookie, std::wstring const& uin);
         void ClearQqSession();
 
+        /// ---- 均衡器 ----
+        /// 十段参量 EQ（频点见 core::Equalizer::CenterFreqs），增益 / 前置放大器
+        /// 单位 dB，core 层负责夹在 ±12。eqPreset 只记录 UI 上次选中的预设，
+        /// 用户拖动滑条后置为 "custom"。
+        static constexpr std::size_t EqBandCount = 10;
+
+        bool EqEnabled() const noexcept { return m_eqEnabled; }
+        std::wstring const& EqPreset() const noexcept { return m_eqPreset; }
+        double EqPreampDb() const noexcept { return m_eqPreampDb; }
+        std::array<double, EqBandCount> const& EqGainsDb() const noexcept { return m_eqGains; }
+        void SetEqualizer(bool enabled, std::wstring const& preset, double preampDb,
+                          std::array<double, EqBandCount> const& gainsDb);
+
         static constexpr std::size_t MaxHistory = 12;
 
     private:
@@ -66,6 +81,10 @@ namespace wm::app
         std::wstring m_uiTheme{ L"qq" };
         std::wstring m_qqSessionCookie;
         std::wstring m_qqUin;
+        bool m_eqEnabled = false;
+        std::wstring m_eqPreset{ L"flat" };
+        double m_eqPreampDb = 0.0;
+        std::array<double, EqBandCount> m_eqGains{};
     };
 
     DiscoverSettings& Settings();
