@@ -2,7 +2,12 @@
 
 #include "MainWindow.g.h"
 
+#include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+
+#include <array>
 #include <string>
+#include <vector>
 
 #include "Controls/SpectrumView.h"
 #include "Services/TrayIcon.h"
@@ -49,10 +54,34 @@ namespace winrt::w_music::implementation
         void ApplyTheme(std::wstring const& themeId);
         void UpdateThemeMarks();
 
+        // --- 均衡器（EQ） ----------------------------------------------------
+        /// EQ 面板的滑条全部由代码生成（11 根：前置 + 十段），XAML 只留容器。
+        /// 事件都在代码里挂，所以处理器放 private 也没问题。
+        void BuildEqPanel();
+        void SelectEqPresetItem(std::wstring const& presetId);
+        void ReadEqSliders(double& preampDb, std::array<double, 10>& gainsDb);
+        void ShowEqValues(double preampDb, std::array<double, 10> const& gainsDb);
+        void SaveEqState(); ///< 把面板当前状态写进 settings.json
+
+        // WinUI 3 这批委托的 sender 都是 IInspectable（见 LibraryPage 同款写法）。
+        void OnEqSliderChanged(winrt::Windows::Foundation::IInspectable const& sender,
+                               winrt::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const& args);
+        void OnEqPresetSelected(winrt::Windows::Foundation::IInspectable const& sender,
+                                winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
+        void OnEqToggleChanged(winrt::Windows::Foundation::IInspectable const& sender,
+                               winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnEqResetClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                              winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+
         wm::app::SpectrumView m_spectrumView;
         wm::app::TrayIcon m_trayIcon;
         bool m_updatingSlider = false;
         std::wstring m_themeId{ L"qq" };
+
+        std::vector<winrt::Microsoft::UI::Xaml::Controls::Slider> m_eqSliders;
+        std::vector<winrt::Microsoft::UI::Xaml::Controls::TextBlock> m_eqValueLabels;
+        /// 代码改滑条/预设下拉框时置位，避免 ValueChanged/SelectionChanged 回环。
+        bool m_eqApplying = false;
     };
 }
 

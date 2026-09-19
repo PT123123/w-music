@@ -96,6 +96,34 @@ namespace wm::app
         {
             m_qqUin = Utf16(uin->asString());
         }
+        if (auto const* enabled = root->Find("eqEnabled"); enabled != nullptr && enabled->isBool())
+        {
+            m_eqEnabled = enabled->asBool();
+        }
+        if (auto const* preset = root->Find("eqPreset"); preset != nullptr && preset->isString())
+        {
+            std::wstring const value = Utf16(preset->asString());
+            if (!value.empty())
+            {
+                m_eqPreset = value;
+            }
+        }
+        if (auto const* preamp = root->Find("eqPreampDb"); preamp != nullptr && preamp->isNumber())
+        {
+            m_eqPreampDb = std::clamp(preamp->asNumber(), -12.0, 12.0);
+        }
+        if (auto const* gains = root->Find("eqGains"); gains != nullptr && gains->isArray())
+        {
+            std::size_t i = 0;
+            for (wm::core::json::Value const& entry : gains->asArray())
+            {
+                if (i >= EqBandCount || !entry.isNumber())
+                {
+                    break;
+                }
+                m_eqGains[i++] = std::clamp(entry.asNumber(), -12.0, 12.0);
+            }
+        }
     }
 
     void DiscoverSettings::Save() const
@@ -113,6 +141,16 @@ namespace wm::app
         root["uiTheme"] = wm::core::json::Value{ Utf8(m_uiTheme) };
         root["qqSessionCookie"] = wm::core::json::Value{ Utf8(m_qqSessionCookie) };
         root["qqUin"] = wm::core::json::Value{ Utf8(m_qqUin) };
+        root["eqEnabled"] = wm::core::json::Value{ m_eqEnabled };
+        root["eqPreset"] = wm::core::json::Value{ Utf8(m_eqPreset) };
+        root["eqPreampDb"] = wm::core::json::Value{ m_eqPreampDb };
+
+        wm::core::json::Array gains;
+        for (double gain : m_eqGains)
+        {
+            gains.push_back(wm::core::json::Value{ gain });
+        }
+        root["eqGains"] = wm::core::json::Value{ std::move(gains) };
 
         WriteFile(SettingsFilePath(), wm::core::json::Serialize(wm::core::json::Value{ std::move(root) }, true));
     }
@@ -223,6 +261,26 @@ namespace wm::app
         }
         m_qqSessionCookie.clear();
         m_qqUin.clear();
+        Save();
+    }
+
+    void DiscoverSettings::SetEqualizer(bool enabled, std::wstring const& preset, double preampDb,
+                                        std::array<double, EqBandCount> const& gainsDb)
+    {
+        std::array<double, EqBandCount> clamped{};
+        for (std::size_t i = 0; i < EqBandCount; ++i)
+        {
+            clamped[i] = std::clamp(gainsDb[i], -12.0, 12.0);
+        }
+        preampDb = std::clamp(preampDb, -12.0, 12.0);
+        if (m_eqEnabled == enabled && m_eqPreset == preset && m_eqPreampDb == preampDb && m_eqGains == clamped)
+        {
+            return;
+        }
+        m_eqEnabled = enabled;
+        m_eqPreset = preset;
+        m_eqPreampDb = preampDb;
+        m_eqGains = clamped;
         Save();
     }
 

@@ -251,6 +251,29 @@
                             </Flyout>
                         </Button.Flyout>
                     </Button>
+                    <!-- 均衡器：11 根垂直滑条（前置 + 十段）由代码生成，XAML 只放容器 -->
+                    <Button x:Name="EqButton" Padding="12,6" CornerRadius="14"
+                            ToolTipService.ToolTip="均衡器">
+                        <TextBlock Text="EQ" FontSize="13" />
+                        <Button.Flyout>
+                            <Flyout Placement="Top">
+                                <StackPanel Width="452" Spacing="10" RequestedTheme="Dark">
+                                    <Grid>
+                                        <TextBlock Text="均衡器" FontSize="15" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="EqToggle" HorizontalAlignment="Right"
+                                                      MinWidth="0" Padding="0" OnContent="" OffContent="" />
+                                    </Grid>
+                                    <ComboBox x:Name="EqPresetBox" HorizontalAlignment="Stretch" />
+                                    <StackPanel x:Name="EqBandsHost" Orientation="Horizontal" Spacing="4"
+                                                HorizontalAlignment="Center" />
+                                    <TextBlock FontSize="11" Opacity="0.6" Text="每段 ±12 dB，31 Hz – 16 kHz；关闭时音频直接输出" />
+                                    <Button x:Name="EqResetButton" Content="重置" HorizontalAlignment="Right"
+                                            Padding="12,4" CornerRadius="12" />
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                     <Button x:Name="LyricButton" Content="歌词" Padding="12,6" CornerRadius="14"
                             ToolTipService.ToolTip="打开歌词页" />
                     <FontIcon Glyph="&#xE767;" FontSize="14" Opacity="0.7" VerticalAlignment="Center" />

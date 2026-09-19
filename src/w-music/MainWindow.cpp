@@ -123,6 +123,41 @@ namespace
         {
         }
     }
+
+    // -----------------------------------------------------------------------
+    // 均衡器预设
+    // -----------------------------------------------------------------------
+    // 十段增益（dB，31 Hz – 16 kHz），沿用 AIMP/Winamp 一脉的经典曲线。
+    // 预设只改频段增益，前置放大器（第 0 根滑条）保持用户当前值。
+    struct EqPresetInfo
+    {
+        wchar_t const* id;
+        wchar_t const* name;
+        std::array<double, 10> gains;
+    };
+
+    EqPresetInfo const kEqPresets[]{
+        { L"flat",      L"平直",     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+        { L"dance",     L"舞曲",     { 7, 6.5, 2, 0, -1.5, -2.5, 0, 3.5, 5.5, 6 } },
+        { L"pop",       L"流行",     { -1, 0.5, 2.5, 4.5, 5, 4, 2, 0, -0.5, -1 } },
+        { L"rock",      L"摇滚",     { 5.5, 4.5, 3, 1, -1.5, -2.5, -1.5, 3.5, 5, 6 } },
+        { L"jazz",      L"爵士",     { 4.5, 3.5, 1.5, 4, -1.5, -1.5, 0.5, 3.5, 4.5, 4.5 } },
+        { L"classical", L"古典",     { 6, 5.5, 5, 2.5, 0, -2, -4, -4.5, -2.5, 1.5 } },
+        { L"bass",      L"低音增强", { 8, 7.5, 6.5, 4, 1, 0, 0, 0, 0, 0 } },
+        { L"vocal",     L"人声",     { -2, -1, 0.5, 3, 4.5, 4.5, 3.5, 2, 1, 0.5 } },
+    };
+
+    // 11 根滑条的名字：第 0 根是前置放大器，其余对应上面十段。
+    wchar_t const* const kEqColumnLabels[]{
+        L"前置", L"31", L"63", L"125", L"250", L"500", L"1k", L"2k", L"4k", L"8k", L"16k"
+    };
+
+    hstring FormatEqDb(double value)
+    {
+        wchar_t buffer[16];
+        swprintf(buffer, 16, L"%+.1f", value);
+        return hstring{ buffer };
+    }
 } // namespace
 
 namespace winrt::w_music::implementation
@@ -168,6 +203,15 @@ namespace winrt::w_music::implementation
         m_spectrumView.Attach(SpectrumCanvas(), 28);
         ThemeButton().Click({ this, &MainWindow::OnThemeClick });
         ApplyTheme(wm::app::Settings().UiTheme());
+
+        // EQ 面板 + 把存档的均衡器配置推给播放器（此时还没有曲目，
+        // SetEqualizerEnabled 只会记下开关，首播时再生效）。
+        BuildEqPanel();
+        auto& settings = wm::app::Settings();
+        auto* playerVm = winrt::get_self<implementation::PlayerViewModel>(player);
+        playerVm->ConfigureEqualizer(settings.EqGainsDb(), settings.EqPreampDb());
+        playerVm->SetEqualizerEnabled(settings.EqEnabled());
+
         UpdateTransport();
     }
 
@@ -183,6 +227,7 @@ namespace winrt::w_music::implementation
 
     void MainWindow::OnLoaded(Windows::Foundation::IInspectable const&, RoutedEventArgs const&)
     {
+        using namespace winrt::w_music::implementation;
         wm::app::LibraryVm().InitializeAsync(AppWindow().Id());
         NavView().SelectedItem(DiscoverNavItem());
         NavigateTo(hstring{ L"discover" });
@@ -418,5 +463,190 @@ namespace winrt::w_music::implementation
             }
             icon.Visibility(theme.id == m_themeId ? Visibility::Visible : Visibility::Collapsed);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // 均衡器面板
+    // -----------------------------------------------------------------------
+
+    void MainWindow::BuildEqPanel()
+    {
+        auto const& settings = wm::app::Settings();
+
+        for (auto const& preset : kEqPresets)
+        {
+            ComboBoxItem item;
+            item.Content(box_value(hstring{ preset.name }));
+            item.Tag(box_value(hstring{ preset.id }));
+            EqPresetBox().Items().Append(item);
+        }
+
+        // 11 列：第 0 列前置放大器，其余十段；每列 = 数值 + 垂直滑条 + 频点名。
+        for (int i = 0; i < 11; ++i)
+        {
+            StackPanel column;
+            column.Spacing(2);
+            column.Width(36);
+
+            TextBlock valueLabel;
+            valueLabel.FontSize(11);
+            valueLabel.TextAlignment(TextAlignment::Center);
+            valueLabel.Opacity(0.75);
+            column.Children().Append(valueLabel);
+
+            Slider slider;
+            slider.Orientation(Orientation::Vertical);
+            slider.Height(150);
+            slider.Minimum(-12.0);
+            slider.Maximum(12.0);
+            slider.StepFrequency(0.5);
+            // 垂直滑条默认"向下增大"，翻转成向上增大才符合推子直觉。
+            slider.IsDirectionReversed(true);
+            slider.HorizontalAlignment(HorizontalAlignment::Center);
+            column.Children().Append(slider);
+
+            TextBlock bandLabel;
+            bandLabel.Text(hstring{ kEqColumnLabels[i] });
+            bandLabel.FontSize(11);
+            bandLabel.TextAlignment(TextAlignment::Center);
+            bandLabel.Opacity(0.7);
+            column.Children().Append(bandLabel);
+
+            EqBandsHost().Children().Append(column);
+            m_eqSliders.push_back(slider);
+            m_eqValueLabels.push_back(valueLabel);
+        }
+
+        // 初值从 settings.json 恢复；先赋值、后挂事件，装配期不触发处理逻辑。
+        double const preamp = settings.EqPreampDb();
+        std::array<double, 10> const& gains = settings.EqGainsDb();
+        m_eqSliders[0].Value(preamp);
+        for (int i = 0; i < 10; ++i)
+        {
+            m_eqSliders[i + 1].Value(gains[i]);
+        }
+        ShowEqValues(preamp, gains);
+        SelectEqPresetItem(settings.EqPreset());
+        EqToggle().IsOn(settings.EqEnabled());
+
+        EqToggle().Toggled({ this, &MainWindow::OnEqToggleChanged });
+        EqPresetBox().SelectionChanged({ this, &MainWindow::OnEqPresetSelected });
+        EqResetButton().Click({ this, &MainWindow::OnEqResetClicked });
+        for (auto const& slider : m_eqSliders)
+        {
+            slider.ValueChanged({ this, &MainWindow::OnEqSliderChanged });
+        }
+    }
+
+    void MainWindow::SelectEqPresetItem(std::wstring const& presetId)
+    {
+        int index = -1;
+        for (std::size_t i = 0; i < std::size(kEqPresets); ++i)
+        {
+            if (presetId == kEqPresets[i].id)
+            {
+                index = static_cast<int>(i);
+                break;
+            }
+        }
+        // "custom"（或未知值）→ -1，下拉框留空。
+        m_eqApplying = true;
+        EqPresetBox().SelectedIndex(index);
+        m_eqApplying = false;
+    }
+
+    void MainWindow::ReadEqSliders(double& preampDb, std::array<double, 10>& gainsDb)
+    {
+        preampDb = m_eqSliders[0].Value();
+        for (int i = 0; i < 10; ++i)
+        {
+            gainsDb[i] = m_eqSliders[i + 1].Value();
+        }
+    }
+
+    void MainWindow::ShowEqValues(double preampDb, std::array<double, 10> const& gainsDb)
+    {
+        m_eqValueLabels[0].Text(FormatEqDb(preampDb));
+        for (int i = 0; i < 10; ++i)
+        {
+            m_eqValueLabels[i + 1].Text(FormatEqDb(gainsDb[i]));
+        }
+    }
+
+    void MainWindow::SaveEqState()
+    {
+        double preamp = 0.0;
+        std::array<double, 10> gains{};
+        ReadEqSliders(preamp, gains);
+        auto const index = EqPresetBox().SelectedIndex();
+        std::wstring const preset = index >= 0 ? std::wstring{ kEqPresets[index].id } : std::wstring{ L"custom" };
+        wm::app::Settings().SetEqualizer(EqToggle().IsOn(), preset, preamp, gains);
+    }
+
+    void MainWindow::OnEqSliderChanged(IInspectable const&, RangeBaseValueChangedEventArgs const&)
+    {
+        if (m_eqApplying)
+        {
+            return;
+        }
+        double preamp = 0.0;
+        std::array<double, 10> gains{};
+        ReadEqSliders(preamp, gains);
+        ShowEqValues(preamp, gains);
+        SelectEqPresetItem(L"custom");
+        SaveEqState();
+        // 即时生效：系数在音频线程上加锁换掉，不重启播放。
+        winrt::get_self<implementation::PlayerViewModel>(wm::app::Player())->ConfigureEqualizer(gains, preamp);
+    }
+
+    void MainWindow::OnEqPresetSelected(IInspectable const&, SelectionChangedEventArgs const&)
+    {
+        if (m_eqApplying)
+        {
+            return;
+        }
+        auto const index = EqPresetBox().SelectedIndex();
+        if (index < 0 || static_cast<std::size_t>(index) >= std::size(kEqPresets))
+        {
+            return;
+        }
+        auto const& preset = kEqPresets[index];
+        m_eqApplying = true;
+        for (int i = 0; i < 10; ++i)
+        {
+            m_eqSliders[i + 1].Value(preset.gains[i]);
+        }
+        m_eqApplying = false;
+
+        double preamp = 0.0;
+        std::array<double, 10> gains{};
+        ReadEqSliders(preamp, gains);
+        ShowEqValues(preamp, gains);
+        SaveEqState();
+        winrt::get_self<implementation::PlayerViewModel>(wm::app::Player())->ConfigureEqualizer(gains, preamp);
+    }
+
+    void MainWindow::OnEqToggleChanged(IInspectable const&, RoutedEventArgs const&)
+    {
+        // 重新绑定播放源（EQ 代理 <-> 直通），进度 / 播放状态会跨切换保留；
+        // 没有曲目时只记下开关，首播再生效。
+        winrt::get_self<implementation::PlayerViewModel>(wm::app::Player())
+            ->SetEqualizerEnabled(EqToggle().IsOn());
+        SaveEqState();
+    }
+
+    void MainWindow::OnEqResetClicked(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_eqApplying = true;
+        for (auto const& slider : m_eqSliders)
+        {
+            slider.Value(0.0);
+        }
+        m_eqApplying = false;
+        SelectEqPresetItem(L"flat");
+        ShowEqValues(0.0, std::array<double, 10>{});
+        SaveEqState();
+        winrt::get_self<implementation::PlayerViewModel>(wm::app::Player())
+            ->ConfigureEqualizer(std::array<double, 10>{}, 0.0);
     }
 }

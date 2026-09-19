@@ -88,6 +88,7 @@
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="Controls\SpectrumView.h" />
     <ClInclude Include="Audio\WasapiLoopback.h" />
+    <ClInclude Include="Audio\EqualizedSource.h" />
     <ClInclude Include="Services\AppPaths.h" />
     <ClInclude Include="Services\LibraryService.h" />
     <ClInclude Include="Services\OnlineProviderService.h" />
@@ -116,6 +117,7 @@
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="Controls\SpectrumView.cpp" />
     <ClCompile Include="Audio\WasapiLoopback.cpp" />
+    <ClCompile Include="Audio\EqualizedSource.cpp" />
     <ClCompile Include="Services\AppPaths.cpp" />
     <ClCompile Include="Services\LibraryService.cpp" />
     <ClCompile Include="Services\OnlineProviderService.cpp" />
@@ -162,6 +164,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\..\core\src\OnlineSources.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\core\src\Equalizer.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
