@@ -3,6 +3,7 @@
 #include "ViewModels/PlayerViewModel.h"
 #include "ViewModels/PlayerViewModel.g.cpp"
 
+#include "Audio/EqualizedSource.h"
 #include "Models/LyricLineItem.h"
 #include "Services/AppPaths.h"
 #include "Services/DiscoverSettings.h"
@@ -56,6 +57,22 @@ namespace winrt::w_music::implementation
             std::size_t const n = std::strlen(prefix);
             return text.size() >= n && text.compare(0, n, prefix) == 0;
         }
+
+        /// Awaiter that hops a fire_and_forget body back onto the UI thread
+        /// (no-op when the coroutine already runs there).
+        struct ResumeToUi
+        {
+            DispatcherQueue queue;
+
+            bool await_ready() const noexcept { return queue == nullptr || queue.HasThreadAccess(); }
+
+            void await_suspend(std::coroutine_handle<> handle) const
+            {
+                queue.TryEnqueue([handle] { handle.resume(); });
+            }
+
+            void await_resume() const noexcept {}
+        };
     } // namespace
 
     PlayerViewModel::PlayerViewModel()
@@ -257,24 +274,58 @@ namespace winrt::w_music::implementation
         std::wstring path{ track.FilePath().c_str() };
         const bool remote = path.rfind(L"http://", 0) == 0 || path.rfind(L"https://", 0) == 0;
 
-        try
+        // EQ active: decode -> filter -> feed back through a MediaStreamSource
+        // proxy. Opening blocks (network!), so hop off the UI thread first; on
+        // any failure we simply continue with the plain source below.
+        bool eqBound = false;
+        if (m_eqEnabled)
         {
-            if (remote)
+            auto eq = std::make_shared<wm::app::EqualizedSource>(m_equalizer, std::move(path));
+            co_await winrt::resume_background();
+            try
             {
-                // Streamed straight from an online source (see OnlineProviderService).
-                m_player.Source(MediaSource::CreateFromUri(winrt::Windows::Foundation::Uri{ track.FilePath() }));
+                if (eq->Open())
+                {
+                    m_eqSource = std::move(eq);
+                    m_player.Source(MediaSource::CreateFromMediaStreamSource(m_eqSource->Source()));
+                    m_player.Play();
+                    eqBound = true;
+                }
             }
-            else
+            catch (...)
             {
-                auto file = co_await StorageFile::GetFileFromPathAsync(track.FilePath());
-                m_player.Source(MediaSource::CreateFromStorageFile(file));
+                eqBound = false;
             }
-            m_player.Play();
         }
-        catch (...)
+
+        if (!eqBound)
         {
-            // Unreadable / missing file: fall through so the next track can play.
+            m_eqSource.reset();
+            try
+            {
+                if (remote)
+                {
+                    // Streamed straight from an online source (see OnlineProviderService).
+                    m_player.Source(MediaSource::CreateFromUri(winrt::Windows::Foundation::Uri{ track.FilePath() }));
+                }
+                else
+                {
+                    auto file = co_await StorageFile::GetFileFromPathAsync(track.FilePath());
+                    m_player.Source(MediaSource::CreateFromStorageFile(file));
+                }
+                m_player.Play();
+            }
+            catch (...)
+            {
+                // Unreadable / missing file: fall through so the next track can play.
+            }
         }
+
+        ApplyPendingResume();
+
+        // Lyrics and play-count touch UI-bound collections; make sure we are
+        // back on the UI thread (the EQ branch above ran on a worker thread).
+        co_await ResumeToUi{ m_dispatcher };
 
         if (!remote)
         {
@@ -384,6 +435,64 @@ namespace winrt::w_music::implementation
             m_player.IsMuted(value);
         }
         RaisePropertyChanged(L"IsMuted");
+    }
+
+    // -------------------------------------------------------------- equalizer
+
+    void PlayerViewModel::ConfigureEqualizer(std::array<double, wm::core::Equalizer::BandCount> const& gainsDb,
+                                             double preampDb)
+    {
+        m_equalizer.SetGains(gainsDb, preampDb);
+    }
+
+    void PlayerViewModel::SetEqualizerEnabled(bool enabled)
+    {
+        if (m_eqEnabled == enabled)
+        {
+            return;
+        }
+        m_eqEnabled = enabled;
+
+        if (m_currentTrack == nullptr || m_player == nullptr)
+        {
+            return;
+        }
+
+        // Re-bind the source (proxy <-> direct) and resume where we left off.
+        // A restart while paused must not start playback.
+        m_pendingSeekSeconds = m_positionSeconds;
+        m_pendingResumePaused = !m_isPlaying;
+        StartPlaybackAsync(m_currentTrack);
+    }
+
+    void PlayerViewModel::ApplyPendingResume()
+    {
+        if (m_pendingSeekSeconds == 0.0 && !m_pendingResumePaused)
+        {
+            return;
+        }
+        const double seek = m_pendingSeekSeconds;
+        const bool pause = m_pendingResumePaused;
+        m_pendingSeekSeconds = 0.0;
+        m_pendingResumePaused = false;
+
+        try
+        {
+            if (seek > 0.0)
+            {
+                m_player.PlaybackSession().Position(ToTimeSpan(seek));
+                m_positionSeconds = seek;
+                RaisePropertyChanged(L"PositionSeconds");
+                RaisePropertyChanged(L"PositionText");
+            }
+            if (pause)
+            {
+                m_player.Pause();
+            }
+        }
+        catch (...)
+        {
+        }
     }
 
     void PlayerViewModel::Mode(winrt::w_music::PlayMode value)

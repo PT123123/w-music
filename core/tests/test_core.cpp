@@ -2,6 +2,7 @@
 // Build (Linux/WSL):  g++ -std=c++17 -I core/include core/src/*.cpp core/tests/test_core.cpp -o test_core
 // Build (MSVC):       cl /std:c++17 /EHsc /I core\include core\src\*.cpp core\tests\test_core.cpp
 
+#include "wm/core/Equalizer.h"
 #include "wm/core/Fft.h"
 #include "wm/core/Json.h"
 #include "wm/core/LibraryStore.h"
@@ -376,11 +377,123 @@ void TestPlayQueue() {
     CHECK(queue.Current() == std::nullopt);
 }
 
+void TestEqualizer() {
+    std::cout << "[Equalizer]\n";
+
+    constexpr double kRate = 48000.0;
+    constexpr std::size_t kFrames = 32768;
+
+    // Amplitude of the tail of a processed sine (transient filtered out by the
+    // skip). 0.5 head-room keeps Process()'s output clamp out of the maths.
+    auto probe = [&](double freqHz, const std::array<double, wm::core::Equalizer::BandCount>& gains,
+                     double preampDb) {
+        wm::core::Equalizer eq;
+        eq.SetSampleRate(kRate);
+        eq.SetGains(gains, preampDb);
+        std::vector<float> buf(kFrames);
+        for (std::size_t i = 0; i < kFrames; ++i) {
+            buf[i] = static_cast<float>(0.5 * std::sin(2.0 * kPi * freqHz * static_cast<double>(i) / kRate));
+        }
+        // Mono: the filter still expects an interleaved buffer, one channel is fine.
+        eq.Process(buf.data(), kFrames, 1);
+        double sum = 0.0;
+        constexpr std::size_t kTail = kFrames / 4;
+        for (std::size_t i = kFrames - kTail; i < kFrames; ++i) {
+            sum += static_cast<double>(buf[i]) * buf[i];
+        }
+        return std::sqrt(sum / static_cast<double>(kTail)) / (std::sqrt(0.5)); // normalise to amplitude
+    };
+
+    const auto zeroGains = [] {
+        std::array<double, wm::core::Equalizer::BandCount> g{};
+        return g;
+    }();
+
+    // Flat config passes a sine through untouched.
+    {
+        const double amp = probe(1000.0, zeroGains, 0.0);
+        CHECK(std::abs(amp - 0.5) < 0.01);
+    }
+
+    // -12 dB at the probed centre frequency: amplitude ~ 10^(-12/20).
+    {
+        auto gains = zeroGains;
+        gains[5] = -12.0; // 1 kHz band
+        const double amp = probe(1000.0, gains, 0.0);
+        CHECK(std::abs(amp - 0.5 * std::pow(10.0, -12.0 / 20.0)) < 0.02);
+    }
+
+    // +6 dB one band up leaves the probed frequency nearly alone.
+    {
+        auto gains = zeroGains;
+        gains[7] = 6.0; // 4 kHz band, probing 1 kHz
+        const double amp = probe(1000.0, gains, 0.0);
+        CHECK(std::abs(amp - 0.5) < 0.03);
+    }
+
+    // Preamp scales linearly.
+    {
+        const double amp = probe(500.0, zeroGains, 6.0206); // ~2x
+        CHECK(std::abs(amp - 1.0) < 0.05);
+    }
+
+    // Gains are clamped to the +/-12 dB range.
+    {
+        wm::core::Equalizer eq;
+        eq.SetSampleRate(kRate);
+        auto gains = zeroGains;
+        gains[0] = 99.0;
+        gains[9] = -99.0;
+        eq.SetGains(gains);
+        const auto read = eq.GainsDb();
+        CHECK(read[0] == wm::core::Equalizer::MaxGainDb);
+        CHECK(read[9] == wm::core::Equalizer::MinGainDb);
+    }
+
+    // Stereo processing keeps channels independent and finite.
+    {
+        wm::core::Equalizer eq;
+        eq.SetSampleRate(kRate);
+        auto gains = zeroGains;
+        gains[3] = 6.0;
+        eq.SetGains(gains);
+        std::vector<float> stereo(kFrames * 2);
+        for (std::size_t i = 0; i < kFrames; ++i) {
+            stereo[i * 2] = static_cast<float>(std::sin(2.0 * kPi * 250.0 * i / kRate));
+            stereo[i * 2 + 1] = static_cast<float>(std::sin(2.0 * kPi * 250.0 * i / kRate));
+        }
+        eq.Process(stereo.data(), kFrames, 2);
+        bool finite = true;
+        for (float v : stereo) {
+            if (!std::isfinite(v)) finite = false;
+        }
+        CHECK(finite);
+        double diff = 0.0;
+        for (std::size_t i = kFrames - 1000; i < kFrames; ++i) {
+            diff += std::abs(stereo[i * 2] - stereo[i * 2 + 1]);
+        }
+        CHECK(diff < 1e-3); // identical channels stay identical
+    }
+
+    // IsActive tracks the configuration so callers can bypass cleanly.
+    {
+        wm::core::Equalizer eq;
+        eq.SetSampleRate(kRate);
+        auto gains = zeroGains;
+        gains[5] = 12.0;
+        eq.SetGains(gains);
+        CHECK(eq.IsActive());
+        eq.SetGains(zeroGains);
+        CHECK(!eq.IsActive());
+    }
+}
+
 } // namespace
 
 int main() {
     TestFft();
     TestSpectrum();
+    TestEqualizer();
     TestLyrics();
     TestJson();
     TestLibrary();

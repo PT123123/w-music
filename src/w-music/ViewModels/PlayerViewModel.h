@@ -4,14 +4,22 @@
 
 #include "Audio/WasapiLoopback.h"
 
+#include <wm/core/Equalizer.h>
 #include <wm/core/Lyric.h>
 #include <wm/core/PlayQueue.h>
 #include <wm/core/SpectrumAnalyzer.h>
 
+#include <array>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <vector>
+
+namespace wm::app
+{
+    class EqualizedSource;
+}
 
 namespace winrt::w_music::implementation
 {
@@ -78,6 +86,15 @@ namespace winrt::w_music::implementation
         /// Called once from the UI thread so timers bind to the right dispatcher.
         void Initialize(winrt::Microsoft::UI::Dispatching::DispatcherQueue const& queue);
 
+        // ---- equalizer ----
+        /// Live per-band gains (dB) + preamp (dB); applied to the audio thread
+        /// without restarting playback.
+        void ConfigureEqualizer(std::array<double, wm::core::Equalizer::BandCount> const& gainsDb, double preampDb);
+        /// Toggling re-binds the playback source (proxy vs. direct); the current
+        /// position / play state survive the switch.
+        void SetEqualizerEnabled(bool enabled);
+        bool EqualizerEnabled() const noexcept { return m_eqEnabled; }
+
         winrt::event_token PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept { m_propertyChanged.remove(token); }
 
@@ -97,6 +114,8 @@ namespace winrt::w_music::implementation
         void OnMediaEnded(winrt::Windows::Media::Playback::MediaPlayer const& sender, winrt::Windows::Foundation::IInspectable const& args);
         void PushSpectrumToUi();
         void SyncFavoriteState();
+        /// Restores position / pause state after SetEqualizerEnabled re-bound the source.
+        void ApplyPendingResume();
 
         winrt::Windows::Media::Playback::MediaPlayer m_player{ nullptr };
         winrt::w_music::TrackItem m_currentTrack{ nullptr };
@@ -122,6 +141,15 @@ namespace winrt::w_music::implementation
         std::vector<double> m_pendingBars;
         std::map<std::size_t, std::function<void(std::vector<double> const&)>> m_spectrumSinks;
         std::size_t m_nextSinkId = 1;
+
+        // Equalizer: the DSP instance is fed by the UI thread and read by the
+        // proxy source's decode thread; m_eqSource keeps the proxy alive while
+        // it backs the current playback.
+        wm::core::Equalizer m_equalizer;
+        bool m_eqEnabled = false;
+        std::shared_ptr<wm::app::EqualizedSource> m_eqSource;
+        double m_pendingSeekSeconds = 0.0;
+        bool m_pendingResumePaused = false;
 
         winrt::Microsoft::UI::Dispatching::DispatcherQueue m_dispatcher{ nullptr };
         winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_timer{ nullptr };

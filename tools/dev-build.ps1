@@ -514,6 +514,7 @@ $appSources = @(
     'Services\OnlineProviderService.cpp', 'Services\BuiltinProviders.cpp',
     'Services\DiscoverSettings.cpp', 'Services\Services.cpp', 'Services\TrayIcon.cpp',
     'Controls\SpectrumView.cpp', 'Audio\WasapiLoopback.cpp',
+    'Audio\EqualizedSource.cpp',
     'Views\DiscoverPage.cpp', 'Views\LibraryPage.cpp',
     'Views\NowPlayingPage.cpp', 'Views\OnlinePage.cpp'
 )
@@ -624,7 +625,10 @@ $linkLibs = @('windowsapp.lib',
               'ole32.lib', 'oleaut32.lib', 'uuid.lib', 'runtimeobject.lib',
               'shell32.lib', 'shlwapi.lib', 'propsys.lib', 'user32.lib',
               'gdi32.lib', 'd3d11.lib', 'dxgi.lib', 'windowscodecs.lib',
-              'bcrypt.lib') -join ' '
+              'bcrypt.lib',
+              # Equalizer decode proxy (Audio\EqualizedSource.cpp): MFStartup /
+              # source reader / GUIDs like MFAudioFormat_Float.
+              'mfplat.lib', 'mfreadwrite.lib', 'mfuuid.lib') -join ' '
 
 $objectDir = Join-Path $BuildDir 'obj'
 New-Item -ItemType Directory -Force -Path $objectDir | Out-Null
