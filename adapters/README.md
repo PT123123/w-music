@@ -86,9 +86,14 @@ client_id 的 Jamendo 模板（后缀 `.example` 不会被加载）。
 - 站点改版 → 只改这份 JSON，不用动代码（内置源同理：写一份同 id 的外部适配器覆盖它）。
 
 核心引擎 `core/src/ProviderEngine.cpp` 有 104 项离线单测（模板渲染、JSON 路径、正则提取、
-HTML 实体、HTML/JSON 两种管线、根数组与嵌套展开、失败路径），在 WSL 里：
+HTML 实体、HTML/JSON 两种管线、根数组与嵌套展开、失败路径），在**仓库根目录**下跑：
 
 ```
-wsl -e bash -lc "cd /mnt/c/Users/<account>/Desktop/w-music && \
-  g++ -std=c++17 -Wall -Wextra -I core/include core/src/*.cpp core/tests/test_provider.cpp -o /tmp/t && /tmp/t"
+wsl -e bash -lc 'g++ -std=c++17 -Wall -Wextra -I core/include \
+  core/src/Json.cpp core/src/ProviderAdapter.cpp core/src/ProviderEngine.cpp \
+  core/tests/test_provider.cpp -o /tmp/tp && /tmp/tp'
 ```
+
+`wsl` 会把当前目录映射成对应的 `/mnt/...` 路径，所以不需要写死本机路径。
+这里逐个列出源文件（而不是 `core/src/*.cpp`）：`core/src/OnlineSources.cpp` 用了 MSVC 专有的
+`_stricmp`，g++ 编不过，所以 WSL 里只能编引擎测试。

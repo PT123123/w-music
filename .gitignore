@@ -22,9 +22,14 @@ project.assets.json
 *.nuget.targets
 
 ## Generated
+## (`/build/`, above, holds every generated artifact: the cppwinrt projections
+## under gen/sdk + gen/winui, the combined winmd, the XamlCompiler output under
+## gen/xaml, and the .xbf files deployed next to the exe. None of it is source.)
 Generated Files/
 *.g.h
 *.g.cpp
+## Scratch directory git filter-branch creates; harmless if it ever gets left behind.
+.git-rewrite/
 
 ## Local data
 *.tmp
