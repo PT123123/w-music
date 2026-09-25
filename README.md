@@ -191,6 +191,33 @@ just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\works
 UI 侧 66ms 的 `DispatcherQueueTimer` 取帧并让 `SpectrumView` 改 Rectangle 高度。
 播放条与正在播放页可同时显示（多个 sink，页面卸载时自动注销）。
 
+## 崩溃怎么查（diag.log + /MAP）
+
+发布版**不带 PDB**，WER 只会给一个偏移量，所以 `App::App()` 里先装
+`wm::app::InstallCrashLogger()`（`Services/AppPaths.cpp`）：
+
+- **向量化异常处理器**（`AddVectoredExceptionHandler(1, …)`）先看到故障，写一行
+  `AV code=… rip=+<rva> fault=… ts=<PE 时间戳> tid=… ui=…` 加一行 `AV stack +<rva> +<rva> …`
+  （只记访问违例的前 4 次，栈上只挑落在 exe 代码段内的字，最多 24 个）；
+  `SetUnhandledExceptionFilter` 再兜一层写 `CRASH` 同样的行。两者都只用 Win32 API 直接追加到
+  `%LOCALAPPDATA%\w-music\diag.log`，不依赖 CRT。
+- 链接规则带 `/MAP`，产物 `build\w-music.map` 与 exe 是同一次链接。解析：
+
+```powershell
+python tools\crash_symbols.py    # 读 diag.log 的 AV/CRASH 行，按 map 里最近的导出符号还原调用栈
+```
+
+  `ts=` 对不上就是拿错了 map——先确认 map 的时间戳和 AV 行的时间戳一致。
+
+**C++/WinRT 协程参数规则**（0.1.21 修的那次闪退就是它）：协程函数**别用引用参数**。MSVC 把
+`T const&` 按引用存进协程帧，而 IDL 方法进来时先过 generated produce shim，shim 里的接口是个临时对象；
+第一次 `co_await` 之后再读它就是访问已释放内存。`fire_and_forget` 更直接——调用方（比如 XAML 事件处理函数）
+在第一个挂起点就返回了，它的局部变量当场作废。凡是 await 之后还要用的参数一律**按值**
+（`CategoryItem category` / `hstring text` / `std::string mid`），帧自己持有引用计数。
+`SelectCategoryAsync`（点「本曲库里自动发现的类别」chip 闪退，`category.Note()` 在 await 后读）
+就是这条规则的样本，同类写法在 `LoadOnlineLyric` / `ShowAddToPlaylistDialog` /
+`DownloadItemsAsync` / `ResolveNet24Tier` / `RunNet24Download` / `ImportFileAsync` / `ScanPathAsync` 一并改了。
+
 ## 核心层测试
 
 核心层不依赖 WinRT。`just build`（或 `.\build.ps1`）会用 MSVC（`/std:c++20`）把它编译成

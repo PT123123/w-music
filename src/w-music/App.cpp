@@ -16,6 +16,10 @@ namespace winrt::w_music::implementation
     {
         InitializeComponent();
 
+        // Crash first, explain later: without this a fault is only visible as a
+        // WER record with a bare offset (see wm::app::InstallCrashLogger).
+        wm::app::InstallCrashLogger();
+
         // 整套界面是围绕饱和的主题渐变设计的（深色玻璃面板 + 白字），所以应用级
         // 也锁深色。窗口根节点还会再设一次 ElementTheme.Dark，这里这一次是为了让
         // Flyout / ContentDialog 这类挂在自己 XamlRoot 上的弹出层也走深色资源。

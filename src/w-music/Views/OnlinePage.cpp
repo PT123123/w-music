@@ -994,7 +994,7 @@ namespace winrt::w_music::implementation
         ResolveNet24Tier(row->second, QualityOfTypeLetter(key.substr(separator + 1)), chip);
     }
 
-    winrt::fire_and_forget OnlinePage::ResolveNet24Tier(winrt::w_music::OnlineTrackItem const& row,
+    winrt::fire_and_forget OnlinePage::ResolveNet24Tier(winrt::w_music::OnlineTrackItem row,
                                                         wm::core::Net24Quality quality,
                                                         Button chip)
     {
@@ -1073,7 +1073,7 @@ namespace winrt::w_music::implementation
         }
     }
 
-    winrt::fire_and_forget OnlinePage::RunNet24Download(winrt::w_music::OnlineTrackItem const& row,
+    winrt::fire_and_forget OnlinePage::RunNet24Download(winrt::w_music::OnlineTrackItem row,
                                                         wm::core::Net24Quality quality)
     {
         auto lifetime = get_strong();
@@ -1322,7 +1322,7 @@ namespace winrt::w_music::implementation
     }
 
     winrt::fire_and_forget OnlinePage::DownloadItemsAsync(
-        IVectorView<IInspectable> const& items)
+        IVectorView<IInspectable> items)
     {
         auto lifetime = get_strong();
         if (items.Size() == 0)

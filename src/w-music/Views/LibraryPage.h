@@ -28,7 +28,9 @@ namespace winrt::w_music::implementation
         void OnPlayPlaylistClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
         winrt::fire_and_forget ShowNewPlaylistDialog();
-        winrt::fire_and_forget ShowAddToPlaylistDialog(winrt::w_music::TrackItem const& track);
+        /// By value: this is fire-and-forget and the caller is a plain event
+        /// handler, so a reference parameter would dangle after the first await.
+        winrt::fire_and_forget ShowAddToPlaylistDialog(winrt::w_music::TrackItem track);
 
         winrt::w_music::PlaylistItem m_selectedPlaylist{ nullptr };
     };

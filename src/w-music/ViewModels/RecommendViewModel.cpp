@@ -134,6 +134,7 @@ namespace winrt::w_music::implementation
         {
             m_items.Append(row);
         }
+        wm::app::Diag("rec list bound n=" + std::to_string(static_cast<int>(m_items.Size())));
 
         m_listHeader = std::move(header);
         RaisePropertyChanged(L"ListHeader");
@@ -203,9 +204,17 @@ namespace winrt::w_music::implementation
         co_await LoadFeedAsync(true);
     }
 
-    IAsyncAction RecommendViewModel::SelectCategoryAsync(w_music::CategoryItem const& category)
+    IAsyncAction RecommendViewModel::SelectCategoryAsync(w_music::CategoryItem category)
     {
+        // |category| is a by-value parameter, so the coroutine frame keeps its
+        // own interface reference. That matters: the IDL signature reaches this
+        // method through the generated produce-side shim, which passes a
+        // temporary. A `const&` parameter then stores a reference to that
+        // temporary, and touching it after the first co_await reads freed
+        // memory -- the 0xC0000005 that killed the app on an auto-* chip.
         hstring const id = category != nullptr ? category.Id() : hstring{};
+        hstring const label = category != nullptr ? category.Label() : hstring{};
+        hstring const note = category != nullptr ? category.Note() : hstring{};
         if (id.empty())
         {
             co_await LoadFeedAsync(false);
@@ -215,18 +224,20 @@ namespace winrt::w_music::implementation
         m_selectedCategoryId = std::wstring{ id };
         RaisePropertyChanged(L"SelectedCategoryId");
         SetBusy(true);
+        wm::app::Diag("rec category select id=" + wm::app::Utf8(std::wstring{ id }));
         auto pending = wm::app::Recommend().GetCategoryAsync(id, 30);
-        hstring header = hstring{ L"曲风：" } + category.Label();
+        hstring header = hstring{ L"曲风：" } + label;
         // The note describes exactly this answer, so it is read after the
         // await (the service keeps the caveats of the last category call).
         co_await LoadListAsync(std::move(pending), std::move(header));
         SetCategoryNote(wm::app::Recommend().LastCategoryNote());
-        if (!category.Note().empty())
+        if (!note.empty())
         {
             SetCategoryNote(m_categoryNote.empty()
-                ? category.Note()
-                : m_categoryNote + hstring{ L"；" } + category.Note());
+                ? note
+                : m_categoryNote + hstring{ L"；" } + note);
         }
+        wm::app::Diag("rec category select done");
     }
 
     IAsyncAction RecommendViewModel::SearchByTextAsync(hstring text)

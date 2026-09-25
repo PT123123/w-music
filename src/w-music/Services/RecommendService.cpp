@@ -172,8 +172,14 @@ namespace wm::app
 
     hstring RecommendService::SpawnEngine()
     {
+        // Non-throwing filesystem probes only: this runs inside a fire-and-forget
+        // coroutine chain, and a std::filesystem_error escaping it would unwind
+        // into an abandoned IAsyncAction -- std::terminate -- taking the whole
+        // UI down with the recommend feature. Every probe below reports through
+        // the returned error string instead.
         const std::wstring repo = RepoDir();
-        if (repo.empty() || !std::filesystem::exists(repo))
+        std::error_code ec;
+        if (repo.empty() || !std::filesystem::exists(repo, ec) || ec)
         {
             return hstring{ L"未找到 music-recommend 引擎目录（github.com/PT123123/music-recommend），"
                             L"可用环境变量 WMUSIC_RECOMMEND_DIR 指定" };
@@ -181,7 +187,7 @@ namespace wm::app
 
         std::filesystem::path const venvPython = std::filesystem::path{ repo } / L".venv\\Scripts\\python.exe";
         std::wstring command;
-        if (std::filesystem::exists(venvPython))
+        if (std::filesystem::exists(venvPython, ec) && !ec)
         {
             command = L"\"" + venvPython.wstring() + L"\"";
         }
@@ -264,7 +270,16 @@ namespace wm::app
             if (m_process == nullptr || !m_spawnedHere)
             {
                 m_ready = false;
-                m_lastError = SpawnEngine();
+                try
+                {
+                    m_lastError = SpawnEngine();
+                }
+                catch (...)
+                {
+                    // Same contract as above: a recommend-engine failure may
+                    // only ever become a status line, never an unhandled fault.
+                    m_lastError = hstring{ L"推荐引擎启动失败（进程创建异常）" };
+                }
                 if (!m_lastError.empty())
                 {
                     co_return m_lastError;
@@ -385,7 +400,19 @@ namespace wm::app
             m_lastError = startError;
             co_return hstring{};
         }
-        co_return co_await RequestJsonAsync(std::move(method), std::move(path), std::move(body));
+        try
+        {
+            co_return co_await RequestJsonAsync(std::move(method), std::move(path), std::move(body));
+        }
+        catch (...)
+        {
+            // RequestJsonAsync already maps WinRT faults to m_lastError; this
+            // catch is the outer wall that keeps ANY unexpected exception in
+            // the recommend chain from escaping into a fire-and-forget caller
+            // (an abandoned faulted coroutine fail-fasts the whole app).
+            m_lastError = hstring{ L"推荐引擎请求异常（引擎可能未启动）" };
+            co_return hstring{};
+        }
     }
 
     // -----------------------------------------------------------------------

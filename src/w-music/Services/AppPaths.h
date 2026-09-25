@@ -40,6 +40,14 @@ namespace wm::app
     /// Appends one breadcrumb line to %LOCALAPPDATA%\w-music\diag.log.
     void Diag(std::string_view msg);
 
+    /// Installs a Win32 unhandled-exception filter that writes the exception
+    /// code, the faulting address and every stack word that looks like a
+    /// return address inside w-music.exe to diag.log (as RVAs). w-music ships
+    /// without a PDB and WER only reports the faulting offset, so this is how a
+    /// user-reported crash gets pinned to a call site: resolve the logged RVAs
+    /// against build\w-music.map of the very same link.
+    void InstallCrashLogger();
+
     // ---- encoding helpers (WinRT is UTF-16, the core layer is UTF-8) ----
     std::wstring Utf16(std::string_view utf8);
     std::string Utf8(std::wstring_view utf16);

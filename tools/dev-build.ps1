@@ -706,7 +706,9 @@ $edges = New-Object System.Text.StringBuilder
 [void]$edges.AppendLine('rule link')
 [void]$edges.AppendLine('  command = cl.exe /nologo $in /Fe$out /link /SUBSYSTEM:CONSOLE')
 [void]$edges.AppendLine('rule linkapp')
-[void]$edges.AppendLine('  command = cl.exe /nologo $in /Fe$out /link /SUBSYSTEM:WINDOWS /LIBPATH:"' + $bootstrapLibDir + '" ' + $linkLibs)
+# /MAP is deliberate: the app ships no PDB, so the RVAs that diag.log's CRASH
+# line lists are resolved by hand against build\w-music.map from this same link.
+[void]$edges.AppendLine('  command = cl.exe /nologo $in /Fe$out /link /SUBSYSTEM:WINDOWS /MAP /LIBPATH:"' + $bootstrapLibDir + '" ' + $linkLibs)
 [void]$edges.AppendLine('rule rc')
 [void]$edges.AppendLine('  command = "' + $rcExe + '" /nologo /fo$out $in')
 [void]$edges.AppendLine()

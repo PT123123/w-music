@@ -73,8 +73,11 @@ namespace winrt::w_music::implementation
         void UpdateSelectionUi();
         winrt::fire_and_forget RunSearch(hstring adapterId, hstring query);
         winrt::fire_and_forget PreviewAsync(winrt::w_music::OnlineTrackItem item);
+        /// Interface parameters are by value: these are fire-and-forget, so a
+        /// reference into a handler's locals or into m_net24ByChipKey would be
+        /// read after that owner is gone.
         winrt::fire_and_forget DownloadItemsAsync(
-            winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable> const& items);
+            winrt::Windows::Foundation::Collections::IVectorView<winrt::Windows::Foundation::IInspectable> items);
 
         // ---- QQ 音乐 (replica of a-music's QqSection) ----
         void QqSubmit(hstring const& word);
@@ -95,10 +98,10 @@ namespace winrt::w_music::implementation
         void UpdateNet24ConfigVisibility();
         winrt::fire_and_forget RunNet24Search(hstring query);
         winrt::fire_and_forget RunNet24Preview(winrt::w_music::OnlineTrackItem item);
-        winrt::fire_and_forget ResolveNet24Tier(winrt::w_music::OnlineTrackItem const& row,
+        winrt::fire_and_forget ResolveNet24Tier(winrt::w_music::OnlineTrackItem row,
                                                 wm::core::Net24Quality quality,
                                                 winrt::Microsoft::UI::Xaml::Controls::Button chip);
-        winrt::fire_and_forget RunNet24Download(winrt::w_music::OnlineTrackItem const& row,
+        winrt::fire_and_forget RunNet24Download(winrt::w_music::OnlineTrackItem row,
                                                 wm::core::Net24Quality quality);
 
         /// Superseded searches must not touch the UI when they complete.

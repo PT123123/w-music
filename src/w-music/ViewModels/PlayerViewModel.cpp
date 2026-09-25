@@ -422,7 +422,14 @@ namespace winrt::w_music::implementation
             {
                 co_await LoadLyricAsync(track.Id());
                 co_await ResumeToUi{ m_dispatcher };
-                wm::app::Library().MarkPlayed(track.Id());
+                // "rec:" rows are engine suggestions, not library entries:
+                // MarkPlayed would write unresolvable ids into the recent-played
+                // playlist inside library.json. Keep the recommend namespace out
+                // of the library's stats entirely.
+                if (!StartsWith(IdOf(track.Id()), "rec:"))
+                {
+                    wm::app::Library().MarkPlayed(track.Id());
+                }
             }
             else
             {
@@ -650,7 +657,7 @@ namespace winrt::w_music::implementation
         return mid;
     }
 
-    winrt::fire_and_forget PlayerViewModel::LoadOnlineLyric(std::string const& mid)
+    winrt::fire_and_forget PlayerViewModel::LoadOnlineLyric(std::string mid)
     {
         if (mid.empty())
         {

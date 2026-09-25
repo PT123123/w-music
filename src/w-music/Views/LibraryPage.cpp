@@ -176,7 +176,7 @@ namespace winrt::w_music::implementation
         }
     }
 
-    winrt::fire_and_forget LibraryPage::ShowAddToPlaylistDialog(winrt::w_music::TrackItem const& track)
+    winrt::fire_and_forget LibraryPage::ShowAddToPlaylistDialog(winrt::w_music::TrackItem track)
     {
         auto lifetime = get_strong();
 

@@ -375,7 +375,7 @@ namespace wm::app
         return true;
     }
 
-    IAsyncOperation<winrt::w_music::TrackItem> LibraryService::ImportFileAsync(StorageFile const& file)
+    IAsyncOperation<winrt::w_music::TrackItem> LibraryService::ImportFileAsync(StorageFile file)
     {
         if (file == nullptr)
         {
@@ -409,7 +409,7 @@ namespace wm::app
         co_return FindTrack(hstring{ Utf16(wm::core::LibraryStore::MakeTrackId(Utf8(path))) });
     }
 
-    IAsyncOperation<int> LibraryService::ScanPathAsync(std::wstring const& path, std::function<void(int)> progress)
+    IAsyncOperation<int> LibraryService::ScanPathAsync(std::wstring path, std::function<void(int)> progress)
     {
         const auto dispatcher = m_dispatcher;
         if (dispatcher == nullptr)

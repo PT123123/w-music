@@ -3,6 +3,7 @@
 #include "Views/RecommendPage.h"
 #include "Views/RecommendPage.g.cpp"
 
+#include "Services/AppPaths.h"
 #include "Services/Services.h"
 #include "ViewModels/RecommendViewModel.h"
 
@@ -86,7 +87,10 @@ namespace winrt::w_music::implementation
 
         auto const categoryCopy = category;
         chip.Click([categoryCopy](IInspectable const&, RoutedEventArgs const&)
-            { wm::app::RecommendVm().SelectCategoryAsync(categoryCopy); });
+            {
+                wm::app::Diag("rec chip click id=" + wm::app::Utf8(std::wstring{ categoryCopy.Id() }));
+                wm::app::RecommendVm().SelectCategoryAsync(categoryCopy);
+            });
         return chip;
     }
 

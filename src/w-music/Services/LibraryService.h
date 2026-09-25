@@ -57,8 +57,10 @@ namespace wm::app
 
         /// Adds a single file (used by the online-source downloader) and returns
         /// the resulting library entry, or nullptr when it could not be read.
+        /// |file| is by value: the coroutine keeps using it after its awaits,
+        /// and a reference parameter would only track the caller's temporary.
         winrt::Windows::Foundation::IAsyncOperation<winrt::w_music::TrackItem> ImportFileAsync(
-            winrt::Windows::Storage::StorageFile const& file);
+            winrt::Windows::Storage::StorageFile file);
 
         // ---- playlists ----
         winrt::w_music::PlaylistItem CreatePlaylist(hstring const& name);
@@ -81,7 +83,7 @@ namespace wm::app
                              int scanned,
                              std::function<void(int)> const& progress);
         winrt::Windows::Foundation::IAsyncOperation<int> ScanPathAsync(
-            std::wstring const& path,
+            std::wstring path,
             std::function<void(int)> progress);
         bool IngestFile(winrt::Windows::Storage::StorageFile const& file,
                         winrt::Windows::Storage::FileProperties::MusicProperties const* props);

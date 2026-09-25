@@ -106,7 +106,9 @@ namespace winrt::w_music::implementation
         /// Parses |text| (LRC) into a target-relative track id, i.e. the mid of
         /// an ongoing QQ online track.
         /// Fetches the LRC on a worker thread, then applies it on the UI thread.
-        winrt::fire_and_forget LoadOnlineLyric(std::string const& mid);
+        /// |mid| is by value: this is fire-and-forget, so the caller's own
+        /// string can be gone before the worker reads it.
+        winrt::fire_and_forget LoadOnlineLyric(std::string mid);
         /// Populates m_lyrics / m_lyric from raw LRC text and raises the UI props.
         void ApplyLyricText(std::string const& text);
         /// Strips a "online:qq:{mid}:preview" TrackItem id down to the mid.

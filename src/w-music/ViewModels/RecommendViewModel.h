@@ -59,8 +59,10 @@ namespace winrt::w_music::implementation
         winrt::Windows::Foundation::IAsyncAction RefreshFeedAsync();
         /// 换一批: refetches the feed excluding the rows currently shown.
         winrt::Windows::Foundation::IAsyncAction ShuffleFeedAsync();
-        /// Empty id (the "为你推荐" chip) goes back to the feed.
-        winrt::Windows::Foundation::IAsyncAction SelectCategoryAsync(winrt::w_music::CategoryItem const& category);
+        /// Empty id (the "为你推荐" chip) goes back to the feed. |category| is
+        /// taken by value on purpose: a reference parameter would dangle after
+        /// the first suspension (see the note in the .cpp).
+        winrt::Windows::Foundation::IAsyncAction SelectCategoryAsync(winrt::w_music::CategoryItem category);
         /// The free Chinese entry (POST /v1/recommend/category with `text`).
         /// An empty |text| returns to the feed.
         winrt::Windows::Foundation::IAsyncAction SearchByTextAsync(hstring text);
