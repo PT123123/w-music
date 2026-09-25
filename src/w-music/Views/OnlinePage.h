@@ -106,7 +106,6 @@ namespace winrt::w_music::implementation
         std::uint32_t m_net24SearchToken = 0;
         std::uint32_t m_searchToken = 0;
 
-        winrt::apartment_context m_ui;
         winrt::Microsoft::UI::Dispatching::DispatcherQueue m_dispatcher{ nullptr };
 
         std::wstring m_currentSource;

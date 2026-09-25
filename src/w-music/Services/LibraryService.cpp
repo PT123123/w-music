@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <random>
+#include <unordered_set>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -38,6 +39,10 @@ namespace wm::app
             std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t c) {
                 return static_cast<wchar_t>(towlower(c));
             });
+            if (!lower.empty() && lower.front() != L'.')
+            {
+                lower.insert(lower.begin(), L'.');
+            }
             return std::find(kExtensions.begin(), kExtensions.end(), lower) != kExtensions.end();
         }
 
@@ -73,20 +78,85 @@ namespace wm::app
                        std::chrono::system_clock::now().time_since_epoch()).count();
         }
 
+        wm::core::TrackRecord MakeTrackRecord(std::wstring const& path, MusicProperties const* props, bool findLyrics = true)
+        {
+            wm::core::TrackRecord record;
+            const std::string utf8Path = Utf8(path);
+            record.id = wm::core::LibraryStore::MakeTrackId(utf8Path);
+            record.filePath = utf8Path;
+
+            const auto stem = std::filesystem::path(path).stem().wstring();
+            const auto separator = stem.find(L" - ");
+            if (separator != std::wstring::npos && separator > 0 && separator + 3 < stem.size())
+            {
+                record.artist = Utf8(stem.substr(0, separator));
+                record.title = Utf8(stem.substr(separator + 3));
+            }
+            else
+            {
+                record.title = Utf8(stem);
+            }
+
+            if (props != nullptr)
+            {
+                const auto metadataTitle = props->Title();
+                if (!metadataTitle.empty())
+                {
+                    record.title = Utf8(std::wstring_view{ metadataTitle.c_str(), metadataTitle.size() });
+                }
+                const auto artist = props->Artist();
+                const auto album = props->Album();
+                record.artist = Utf8(std::wstring_view{ artist.c_str(), artist.size() });
+                record.album = Utf8(std::wstring_view{ album.c_str(), album.size() });
+                record.durationMs = props->Duration().count() / 10000;
+                record.bitrateKbps = props->Bitrate();
+            }
+
+            std::error_code sizeError;
+            record.fileSize = std::filesystem::file_size(path, sizeError);
+            if (sizeError)
+            {
+                record.fileSize = 0;
+            }
+            record.dateAdded = NowMs();
+            if (findLyrics)
+            {
+                record.lyricPath = Utf8(FindLyricFile(path));
+            }
+            return record;
+        }
+
         std::string IdOf(hstring const& value)
         {
             return Utf8(std::wstring_view{ value.c_str(), value.size() });
         }
+
+        class ScanGuard
+        {
+        public:
+            explicit ScanGuard(std::atomic_bool& active) : m_active(active) {}
+            ~ScanGuard() { m_active.store(false); }
+            ScanGuard(const ScanGuard&) = delete;
+            ScanGuard& operator=(const ScanGuard&) = delete;
+
+        private:
+            std::atomic_bool& m_active;
+        };
     } // namespace
 
     LibraryService::LibraryService()
     {
+        m_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
         m_tracks = winrt::single_threaded_observable_vector<winrt::w_music::TrackItem>();
         m_playlists = winrt::single_threaded_observable_vector<winrt::w_music::PlaylistItem>();
     }
 
     void LibraryService::Load()
     {
+        if (m_dispatcher == nullptr)
+        {
+            m_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+        }
         EnsureDataDirectory();
         std::string error;
         m_store.Load(LibraryFilePath().string(), &error);
@@ -155,34 +225,64 @@ namespace wm::app
         }
     }
 
-    void LibraryService::IngestFile(StorageFile const& file, MusicProperties const& props)
+    void LibraryService::ApplyTrackBatch(std::vector<wm::core::TrackRecord> batch,
+                                         int scanned,
+                                         std::function<void(int)> const& progress)
+    {
+        for (const auto& record : batch)
+        {
+            m_store.UpsertTrack(record);
+            const auto key = Utf16(record.id);
+            if (const auto it = m_trackIndex.find(key); it != m_trackIndex.end())
+            {
+                auto item = it->second;
+                item.Title(hstring{ Utf16(record.title) });
+                item.Artist(hstring{ Utf16(record.artist) });
+                item.Album(hstring{ Utf16(record.album) });
+                item.FilePath(hstring{ Utf16(record.filePath) });
+                item.DurationMs(record.durationMs);
+                item.PlayCount(record.playCount);
+                item.IsFavorite(record.favorite);
+            }
+            else
+            {
+                auto item = EnsureTrackItem(record);
+                m_tracks.Append(item);
+                m_trackIndex.emplace(key, item);
+            }
+        }
+        // Persist incrementally so a crash mid-scan does not lose the batch.
+        if (!batch.empty())
+        {
+            wm::app::Diag("batch applied n=" + std::to_string(batch.size()));
+            const auto now = NowMs();
+            if (now - m_lastScanSaveMs >= 1000)
+            {
+                m_lastScanSaveMs = now;
+                Save();
+            }
+        }
+        if (progress)
+        {
+            try
+            {
+                progress(scanned);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+    bool LibraryService::IngestFile(StorageFile const& file, MusicProperties const* props)
     {
         const std::wstring path{ file.Path().c_str() };
         if (path.empty())
         {
-            return;
+            return false;
         }
-
-        const std::string utf8Path = Utf8(path);
-
-        wm::core::TrackRecord record;
-        record.id = wm::core::LibraryStore::MakeTrackId(utf8Path);
-        record.filePath = utf8Path;
-
-        std::wstring title{ props.Title().c_str() };
-        if (title.empty())
-        {
-            title = std::filesystem::path(path).stem().wstring();
-        }
-        record.title = Utf8(title);
-        record.artist = Utf8(std::wstring_view{ props.Artist().c_str(), props.Artist().size() });
-        record.album = Utf8(std::wstring_view{ props.Album().c_str(), props.Album().size() });
-        record.durationMs = props.Duration().count() / 10000; // 100ns ticks -> ms
-        record.bitrateKbps = props.Bitrate();
-        record.dateAdded = NowMs();
-        record.lyricPath = Utf8(FindLyricFile(path));
-
-        m_store.UpsertTrack(record);
+        m_store.UpsertTrack(MakeTrackRecord(path, props));
+        return true;
     }
 
     IAsyncOperation<winrt::w_music::TrackItem> LibraryService::ImportFileAsync(StorageFile const& file)
@@ -199,15 +299,24 @@ namespace wm::app
         try
         {
             auto props = co_await file.Properties().GetMusicPropertiesAsync();
-            IngestFile(file, props);
-            RefreshTracks();
-            Save();
-            co_return FindTrack(hstring{ Utf16(wm::core::LibraryStore::MakeTrackId(Utf8(path))) });
+            if (!IngestFile(file, &props))
+            {
+                co_return nullptr;
+            }
         }
         catch (...)
         {
-            co_return nullptr;
+            if (!IngestFile(file, nullptr))
+            {
+                co_return nullptr;
+            }
         }
+        // The property await above resumes on a background thread;
+        // RefreshTracks mutates the bound observable vector, so hop back first.
+        co_await wm::app::ResumeOnUi();
+        RefreshTracks();
+        Save();
+        co_return FindTrack(hstring{ Utf16(wm::core::LibraryStore::MakeTrackId(Utf8(path))) });
     }
 
     IAsyncOperation<int> LibraryService::ScanFolderAsync(StorageFolder folder)
@@ -218,38 +327,171 @@ namespace wm::app
             co_return scanned;
         }
 
-        auto items = co_await folder.GetItemsAsync();
-        for (auto const& item : items)
+        try
         {
-            if (item.IsOfType(StorageItemTypes::Folder))
+            auto items = co_await folder.GetItemsAsync();
+            co_await wm::app::ResumeOnUi();
+            for (auto const& item : items)
             {
-                scanned += co_await ScanFolderAsync(item.as<StorageFolder>());
-            }
-            else if (item.IsOfType(StorageItemTypes::File))
-            {
-                auto file = item.as<StorageFile>();
-                if (!IsAudioExtension(std::wstring_view{ file.FileType().c_str(), file.FileType().size() }))
+                if (item.IsOfType(StorageItemTypes::Folder))
                 {
-                    continue;
+                    try
+                    {
+                        const int child = co_await ScanFolderAsync(item.as<StorageFolder>());
+                        co_await wm::app::ResumeOnUi();
+                        scanned += child;
+                    }
+                    catch (...)
+                    {
+                    }
                 }
+                else if (item.IsOfType(StorageItemTypes::File))
+                {
+                    auto file = item.as<StorageFile>();
+                    if (!IsAudioExtension(std::wstring_view{ file.FileType().c_str(), file.FileType().size() }))
+                    {
+                        continue;
+                    }
 
-                try
-                {
-                    auto props = co_await file.Properties().GetMusicPropertiesAsync();
-                    IngestFile(file, props);
-                    ++scanned;
-                }
-                catch (...)
-                {
-                    // A single unreadable file must not abort the whole scan.
+                    try
+                    {
+                        if (IngestFile(file, nullptr))
+                        {
+                            ++scanned;
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
                 }
             }
+        }
+        catch (...)
+        {
         }
         co_return scanned;
     }
 
-    IAsyncOperation<int> LibraryService::PickAndAddFolderAsync(winrt::Microsoft::UI::WindowId windowId)
+    IAsyncOperation<int> LibraryService::ScanPathAsync(std::wstring const& path, std::function<void(int)> progress)
     {
+        const auto dispatcher = m_dispatcher;
+        if (dispatcher == nullptr)
+        {
+            co_return 0;
+        }
+
+        co_await winrt::resume_background();
+
+        int scanned = 0;
+        std::vector<std::wstring> pending{ path };
+        std::unordered_set<std::wstring> visited;
+        std::vector<wm::core::TrackRecord> batch;
+        auto pendingBatches = std::make_shared<std::atomic_int>(0);
+
+        auto enqueueBatch = [this, dispatcher, progress, pendingBatches](
+                                std::vector<wm::core::TrackRecord> records,
+                                int count) {
+            pendingBatches->fetch_add(1, std::memory_order_release);
+            const bool queued = dispatcher.TryEnqueue(
+                [this, records = std::move(records), count, progress, pendingBatches]() mutable {
+                    try
+                    {
+                        ApplyTrackBatch(std::move(records), count, progress);
+                    }
+                    catch (...)
+                    {
+                    }
+                    pendingBatches->fetch_sub(1, std::memory_order_release);
+                });
+            if (!queued)
+            {
+                pendingBatches->fetch_sub(1, std::memory_order_release);
+                throw hresult_error(E_FAIL);
+            }
+        };
+
+        for (std::size_t index = 0; index < pending.size(); ++index)
+        {
+            const std::filesystem::path current(pending[index]);
+            std::error_code keyError;
+            auto keyPath = std::filesystem::weakly_canonical(current, keyError);
+            if (keyError)
+            {
+                keyPath = current;
+            }
+            auto key = keyPath.wstring();
+            std::transform(key.begin(), key.end(), key.begin(), [](wchar_t c) {
+                return static_cast<wchar_t>(towlower(c));
+            });
+            if (!visited.insert(std::move(key)).second)
+            {
+                continue;
+            }
+
+            std::error_code directoryError;
+            std::filesystem::directory_iterator it(
+                current,
+                std::filesystem::directory_options::skip_permission_denied,
+                directoryError);
+            const std::filesystem::directory_iterator end;
+            if (directoryError)
+            {
+                continue;
+            }
+
+            while (it != end)
+            {
+                const auto entry = *it;
+                std::error_code kindError;
+                if (entry.is_directory(kindError) && !kindError)
+                {
+                    pending.push_back(entry.path().wstring());
+                }
+                else
+                {
+                    kindError.clear();
+                    if (entry.is_regular_file(kindError) && !kindError)
+                    {
+                        const auto extension = entry.path().extension().wstring();
+                        if (IsAudioExtension(std::wstring_view{ extension.c_str(), extension.size() }))
+                        {
+                            batch.push_back(MakeTrackRecord(entry.path().wstring(), nullptr, false));
+                            ++scanned;
+                            if (batch.size() >= 100)
+                            {
+                                enqueueBatch(std::move(batch), scanned);
+                                batch.clear();
+                            }
+                        }
+                    }
+                }
+
+                it.increment(directoryError);
+                if (directoryError)
+                {
+                    break;
+                }
+            }
+        }
+
+        enqueueBatch(std::move(batch), scanned);
+        while (pendingBatches->load(std::memory_order_acquire) != 0)
+        {
+            co_await winrt::resume_after(std::chrono::milliseconds{ 1 });
+        }
+        co_return scanned;
+    }
+
+    IAsyncOperation<int> LibraryService::PickAndAddFolderAsync(
+        winrt::Microsoft::UI::WindowId windowId,
+        std::function<void(int)> progress)
+    {
+        if (m_scanInProgress.exchange(true))
+        {
+            co_return 0;
+        }
+        ScanGuard guard(m_scanInProgress);
+
         FolderPicker picker;
         const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(windowId);
         picker.as<::IInitializeWithWindow>()->Initialize(hwnd);
@@ -262,39 +504,138 @@ namespace wm::app
             co_return 0;
         }
 
-        const hstring token = StorageApplicationPermissions::FutureAccessList().Add(folder);
-        m_store.Data().scanFolders.push_back(Utf8(std::wstring_view{ token.c_str(), token.size() }));
+        hstring token;
+        try
+        {
+            token = StorageApplicationPermissions::FutureAccessList().Add(folder);
+        }
+        catch (...)
+        {
+        }
 
-        const int scanned = co_await ScanFolderAsync(folder);
-        RefreshTracks();
+        const auto path = folder.Path();
+        std::string reference;
+        if (!path.empty())
+        {
+            reference = Utf8(std::wstring_view{ path.c_str(), path.size() });
+        }
+        else if (!token.empty())
+        {
+            reference = Utf8(std::wstring_view{ token.c_str(), token.size() });
+        }
+
+        // Remember (and persist) the folder before scanning so that even a
+        // crash mid-scan leaves enough state to recover on the next launch.
+        if (!reference.empty())
+        {
+            const auto& folders = m_store.Data().scanFolders;
+            if (std::find(folders.begin(), folders.end(), reference) == folders.end())
+            {
+                m_store.Data().scanFolders.push_back(reference);
+            }
+        }
+        Save();
+
+        int scanned = 0;
+        const bool pathScan = !path.empty();
+        if (pathScan)
+        {
+            scanned = co_await ScanPathAsync(std::wstring{ path.c_str(), path.size() }, progress);
+        }
+        else
+        {
+            scanned = co_await ScanFolderAsync(folder);
+        }
+        co_await wm::app::ResumeOnUi();
+        if (!pathScan)
+        {
+            RefreshTracks();
+        }
         RefreshPlaylists();
         Save();
         co_return scanned;
     }
 
-    IAsyncOperation<int> LibraryService::RescanAsync()
+    IAsyncOperation<int> LibraryService::RescanAsync(std::function<void(int)> progress)
     {
-        int scanned = 0;
-        const auto access = StorageApplicationPermissions::FutureAccessList();
-
-        for (const auto& tokenUtf8 : m_store.Data().scanFolders)
+        if (m_scanInProgress.exchange(true))
         {
+            co_return 0;
+        }
+        ScanGuard guard(m_scanInProgress);
+
+        int scanned = 0;
+        int completed = 0;
+        bool needsRefresh = false;
+        auto report = [&progress, &completed](int count) {
+            if (progress)
+            {
+                progress(completed + count);
+            }
+        };
+
+        for (const auto& folderReference : m_store.Data().scanFolders)
+        {
+            const std::wstring path = Utf16(folderReference);
+            std::error_code pathError;
+            if (std::filesystem::is_directory(path, pathError) && !pathError)
+            {
+                try
+                {
+                    const int part = co_await ScanPathAsync(path, report);
+                    co_await wm::app::ResumeOnUi();
+                    scanned += part;
+                    completed += part;
+                }
+                catch (...)
+                {
+                }
+                continue;
+            }
+
+            StorageFolder folder = nullptr;
             try
             {
-                auto folder = co_await access.GetFolderAsync(hstring{ Utf16(tokenUtf8) });
-                if (folder != nullptr)
-                {
-                    scanned += co_await ScanFolderAsync(folder);
-                }
+                folder = co_await StorageFolder::GetFolderFromPathAsync(hstring{ Utf16(folderReference) });
             }
             catch (...)
             {
-                // Token expired or permission revoked: skip that folder.
+            }
+
+            if (folder == nullptr)
+            {
+                try
+                {
+                    const auto access = StorageApplicationPermissions::FutureAccessList();
+                    folder = co_await access.GetFolderAsync(hstring{ Utf16(folderReference) });
+                }
+                catch (...)
+                {
+                }
+            }
+
+            if (folder != nullptr)
+            {
+                try
+                {
+                    const int part = co_await ScanFolderAsync(folder);
+                    co_await wm::app::ResumeOnUi();
+                    scanned += part;
+                    completed += part;
+                    needsRefresh = true;
+                }
+                catch (...)
+                {
+                }
             }
         }
 
-        PruneMissing();
-        RefreshTracks();
+        co_await wm::app::ResumeOnUi();
+        const int removed = PruneMissing();
+        if (needsRefresh || removed > 0)
+        {
+            RefreshTracks();
+        }
         RefreshPlaylists();
         Save();
         co_return scanned;
@@ -302,31 +643,49 @@ namespace wm::app
 
     int LibraryService::PruneMissing()
     {
-        auto& tracks = m_store.Data().tracks;
-        const auto removed = std::stable_partition(tracks.begin(), tracks.end(), [](const wm::core::TrackRecord& t) {
-            return t.filePath.empty() || std::filesystem::exists(Utf16(t.filePath));
-        });
-
-        const int count = static_cast<int>(std::distance(removed, tracks.end()));
-        if (count > 0)
+        std::vector<std::string> missing;
+        for (const auto& track : m_store.Data().tracks)
         {
-            for (auto it = removed; it != tracks.end(); ++it)
+            if (track.filePath.empty())
             {
-                for (auto& playlist : m_store.Data().playlists)
-                {
-                    playlist.trackIds.erase(
-                        std::remove(playlist.trackIds.begin(), playlist.trackIds.end(), it->id),
-                        playlist.trackIds.end());
-                }
+                missing.push_back(track.id);
+                continue;
             }
-            tracks.erase(removed, tracks.end());
+            std::error_code ec;
+            const bool exists = std::filesystem::exists(Utf16(track.filePath), ec);
+            if (!ec && !exists)
+            {
+                missing.push_back(track.id);
+            }
         }
-        return count;
+        for (const auto& id : missing)
+        {
+            m_store.RemoveTrack(id);
+        }
+        return static_cast<int>(missing.size());
     }
 
     std::size_t LibraryService::FolderCount() const noexcept
     {
         return m_store.Data().scanFolders.size();
+    }
+
+    std::vector<std::wstring> LibraryService::FolderPaths() const
+    {
+        // Only entries that still resolve to a real directory: the store may
+        // also carry FutureAccessList tokens (packaged-mode leftovers), which
+        // mean nothing to the recommendation engine.
+        std::vector<std::wstring> paths;
+        for (const auto& reference : m_store.Data().scanFolders)
+        {
+            const std::wstring path = Utf16(reference);
+            std::error_code ec;
+            if (std::filesystem::is_directory(path, ec) && !ec)
+            {
+                paths.push_back(path);
+            }
+        }
+        return paths;
     }
 
     winrt::w_music::TrackItem LibraryService::FindTrack(hstring const& trackId) const

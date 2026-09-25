@@ -19,7 +19,15 @@
         </Grid.RowDefinitions>
 
         <!-- ===== 标题栏（窗口拖动区） ===== -->
-        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40" />
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40">
+            <TextBlock x:Name="VersionText"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Center"
+                       Margin="0,0,150,0"
+                       FontSize="12"
+                       Opacity="0.7"
+                       IsHitTestVisible="False" />
+        </Grid>
 
         <!-- ===== 左侧导航 + 页面宿主 ===== -->
         <NavigationView x:Name="NavView"
@@ -46,6 +54,11 @@
                 <NavigationViewItem x:Name="DiscoverNavItem" Tag="discover" Content="发现音乐">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE10F;" FontSize="15" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="RecommendNavItem" Tag="recommend" Content="个性推荐">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE945;" FontSize="15" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem x:Name="OnlineNavItem" Tag="online" Content="在线发现">

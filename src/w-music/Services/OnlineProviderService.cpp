@@ -400,7 +400,6 @@ namespace wm::app
 
     IAsyncOperation<IVector<winrt::w_music::OnlineTrackItem>> OnlineProviderService::SearchAsync(hstring adapterId, hstring query)
     {
-        winrt::apartment_context ui;
         co_await winrt::resume_background();
 
         std::vector<winrt::w_music::OnlineTrackItem> built;
@@ -416,7 +415,7 @@ namespace wm::app
             }
         }
 
-        co_await ui;
+        co_await wm::app::ResumeOnUi();
         auto vector = winrt::single_threaded_vector<winrt::w_music::OnlineTrackItem>();
         for (auto const& item : built)
         {
@@ -428,7 +427,6 @@ namespace wm::app
     IAsyncOperation<winrt::w_music::OnlineTrackItem> OnlineProviderService::ResolveAsync(
         winrt::w_music::OnlineTrackItem item)
     {
-        winrt::apartment_context ui;
         co_await winrt::resume_background();
 
         if (item != nullptr && Narrow(item.PlayUrl()).empty() && Narrow(item.DownloadUrl()).empty())
@@ -453,7 +451,7 @@ namespace wm::app
             }
         }
 
-        co_await ui;
+        co_await wm::app::ResumeOnUi();
         co_return item;
     }
 
@@ -465,7 +463,6 @@ namespace wm::app
 
     IAsyncOperation<hstring> OnlineProviderService::CachePreviewAsync(winrt::w_music::OnlineTrackItem item)
     {
-        winrt::apartment_context ui;
         co_await winrt::resume_background();
 
         hstring result;
@@ -507,7 +504,7 @@ namespace wm::app
             result = hstring{};
         }
 
-        co_await ui;
+        co_await wm::app::ResumeOnUi();
         co_return result;
     }
 
@@ -541,7 +538,6 @@ namespace wm::app
 
     IAsyncOperation<winrt::w_music::TrackItem> OnlineProviderService::DownloadAsync(winrt::w_music::OnlineTrackItem item)
     {
-        winrt::apartment_context ui;
         co_await winrt::resume_background();
 
         if (item == nullptr)
@@ -602,7 +598,7 @@ namespace wm::app
             }
 
             auto track = wm::app::Library().ImportFileAsync(file).get();
-            co_await ui;
+            co_await wm::app::ResumeOnUi();
             co_return track;
         }
         catch (...)

@@ -1,0 +1,222 @@
+<Page
+    x:Class="w_music.RecommendPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:w_music"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Loaded="OnLoaded"
+    Unloaded="OnUnloaded">
+
+    <!-- 页面背景透明：整窗主题渐变（MainWindow 的 RootHost）直接透过来 -->
+    <Grid Background="Transparent">
+        <ScrollViewer>
+            <StackPanel Padding="28,20,28,28" Spacing="20">
+
+                <!-- ===== 顶部横幅：引擎状态 + 全部动作入口 ===== -->
+                <Border CornerRadius="14"
+                        Padding="28,24"
+                        BorderBrush="{ThemeResource WmBorderBrush}"
+                        BorderThickness="1"
+                        Background="{ThemeResource WmHeroGradientBrush}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="个性推荐"
+                                   FontSize="30"
+                                   FontWeight="Bold"
+                                   Foreground="White" />
+                        <TextBlock Text="本地音频分析驱动的推荐：从每首歌的频谱 / 节奏 / 和声等特征算听感相似度，不依赖任何平台标签。"
+                                   FontSize="13"
+                                   Foreground="#E6FFFFFF"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                                   FontSize="13"
+                                   Foreground="#B3FFFFFF"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,10,0,0">
+                            <Button x:Name="RefreshButton" Content="刷新推荐"
+                                    Background="White" Foreground="{ThemeResource WmAccentBrush}"
+                                    FontWeight="SemiBold" Padding="18,8" />
+                            <Button x:Name="ShuffleButton" Content="换一批"
+                                    Foreground="White" Padding="14,8" />
+                            <Button x:Name="SimilarButton" Content="与我正在听的相似"
+                                    Foreground="White" Padding="14,8" />
+                            <Button x:Name="AnalyzeButton" Content="分析曲库"
+                                    Foreground="White" Padding="14,8"
+                                    ToolTipService.ToolTip="让引擎提取本地曲库的音频特征（首次较慢，之后增量跳过）" />
+                            <Button x:Name="ResetButton" Content="重置口味"
+                                    Foreground="White" Padding="14,8"
+                                    ToolTipService.ToolTip="清空口味画像（喜欢 / 不喜欢 / 播放记录），重新开始" />
+                            <ProgressRing x:Name="BusyRing"
+                                          Width="18" Height="18"
+                                          Foreground="White"
+                                          IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+                                          VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- 自由中文入口：引擎能听懂的词会被说出来，听懂的词也一并说明 -->
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                            <TextBox x:Name="TextQueryBox"
+                                     Width="360"
+                                     PlaceholderText="用一句话说想听什么，如：安静又明亮的纯音乐 / 不要快节奏"
+                                     KeyDown="OnTextQueryKeyDown" />
+                            <Button x:Name="TextQueryButton" Content="按描述找" Foreground="White" Padding="14,8" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== 类别 chips：预设 + 本曲库自动发现（两行都会换行） ===== -->
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="曲风分类" FontSize="15" FontWeight="SemiBold" />
+                        <VariableSizedWrapGrid x:Name="PresetChips"
+                                               Orientation="Horizontal"
+                                               HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                    <StackPanel x:Name="AutoCategorySection" Spacing="6">
+                        <TextBlock Text="本曲库里自动发现的类别" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock Text="{x:Bind ViewModel.DiscoveryText, Mode=OneWay}"
+                                   FontSize="12"
+                                   Opacity="0.6"
+                                   TextWrapping="Wrap" />
+                        <VariableSizedWrapGrid x:Name="AutoChips"
+                                               Orientation="Horizontal"
+                                               HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ===== 推荐列表 ===== -->
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock Text="{x:Bind ViewModel.ListHeader, Mode=OneWay}"
+                                   Style="{StaticResource QqSectionTitleStyle}" />
+                        <TextBlock Text="{x:Bind ViewModel.FeedStateText, Mode=OneWay}"
+                                   FontSize="12"
+                                   Opacity="0.55"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+
+                    <!-- 引擎对这份列表的诚实说明：支持度 / 估计值过滤 / 没答上的词 -->
+                    <Border Visibility="{x:Bind ViewModel.CategoryNoteVisibility, Mode=OneWay}"
+                            CornerRadius="10"
+                            Padding="14,10"
+                            BorderBrush="{ThemeResource WmBorderBrush}"
+                            BorderThickness="1"
+                            Background="{ThemeResource WmPressBrush}">
+                        <TextBlock Text="{x:Bind ViewModel.CategoryNote, Mode=OneWay}"
+                                   FontSize="12"
+                                   Opacity="0.8"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <!-- 空状态 -->
+                    <Border Visibility="{x:Bind ViewModel.EmptyVisibility, Mode=OneWay}"
+                            CornerRadius="14"
+                            Padding="28,36"
+                            BorderBrush="{ThemeResource WmBorderBrush}"
+                            BorderThickness="1"
+                            Background="{ThemeResource WmCardBrush}">
+                        <StackPanel Spacing="8" HorizontalAlignment="Center">
+                            <FontIcon Glyph="&#xEC4F;" FontSize="34"
+                                      Foreground="{ThemeResource WmAccentBrush}"
+                                      HorizontalAlignment="Center" />
+                            <TextBlock Text="推荐列表还是空的" FontSize="16" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="点上方「分析曲库」，引擎会扫描「发现音乐」里添加的文件夹并提取音频特征；分析完成后，这里会出现基于听感的推荐。"
+                                       FontSize="12"
+                                       Opacity="0.65"
+                                       TextAlignment="Center"
+                                       MaxWidth="460"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <ListView x:Name="RecommendList"
+                              ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:RecommendItem">
+                                <Border Margin="0,0,0,8"
+                                        CornerRadius="10"
+                                        Padding="14,10"
+                                        BorderBrush="{ThemeResource WmBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="{ThemeResource WmCardBrush}">
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- 匹配度徽章 -->
+                                        <Border Width="46" Height="46" CornerRadius="10"
+                                                Background="{ThemeResource WmPressBrush}"
+                                                VerticalAlignment="Center">
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind ScoreText}"
+                                                           FontSize="13"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{ThemeResource WmAccentBrush}"
+                                                           TextAlignment="Center" />
+                                                <TextBlock Text="{x:Bind ScoreLabel}"
+                                                           FontSize="9"
+                                                           Opacity="0.6"
+                                                           TextAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{x:Bind Title}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{x:Bind Artist}"
+                                                       FontSize="11"
+                                                       Opacity="0.6"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{x:Bind HasArtist}" />
+                                            <TextBlock Text="{x:Bind Reasons}"
+                                                       FontSize="11"
+                                                       Opacity="0.55"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{x:Bind ReasonsVisibility}" />
+                                            <!-- 文件自带的 tag，不是音频分析出来的 -->
+                                            <TextBlock Text="{x:Bind TagText}"
+                                                       FontSize="11"
+                                                       Opacity="0.45"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{x:Bind HasTagText}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                    VerticalAlignment="Center" Spacing="2">
+                                            <Button Click="OnLikeClick"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="8" CornerRadius="14"
+                                                    ToolTipService.ToolTip="喜欢（推荐会向你这类听感倾斜）">
+                                                <FontIcon Glyph="&#xEB51;" FontSize="14" />
+                                            </Button>
+                                            <Button Click="OnDislikeClick"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="8" CornerRadius="14"
+                                                    ToolTipService.ToolTip="不喜欢（少推这类）">
+                                                <FontIcon Glyph="&#xE711;" FontSize="14" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </StackPanel>
+
+                <TextBlock FontSize="12" Opacity="0.55" TextWrapping="Wrap"
+                           Text="推荐引擎 music-recommend（github.com/PT123123/music-recommend）以本地进程运行：曲库特征保存在它自己的数据库里，播放 / 喜欢 / 不喜欢都会反馈给引擎，让 Feed 越来越贴合你的口味。" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

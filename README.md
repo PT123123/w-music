@@ -1,6 +1,6 @@
 # w-music
 
-类 QQ 音乐的 Windows 桌面播放器：**WinUI 3 (C++/WinRT)** 界面 + **MediaPlayerElement** 播放 + **WASAPI loopback** 实时频谱。曲库本地优先，同时内置 **QQ 音乐在线源**（搜索 / 扫码登录 / 试听 / 歌词 / 下载）。
+类 QQ 音乐的 Windows 桌面播放器：**WinUI 3 (C++/WinRT)** 界面 + **MediaPlayerElement** 播放 + **WASAPI loopback** 实时频谱。曲库本地优先，同时内置 **QQ 音乐在线源**（搜索 / 扫码登录 / 试听 / 歌词 / 下载），并接入姊妹项目 [music-recommend](https://github.com/PT123123/music-recommend) 提供**基于音频分析的本地个性化推荐**。
 
 ## 技术选型
 
@@ -21,15 +21,17 @@ core/                     平台无关核心层（可用 g++ 直接编译并单�
                           OnlineSources（QqSource / QqLoginFlow）, ProviderEngine, ProviderAdapter
   src/  tests/            344 项断言（3 个测试程序），见下方"核心层测试"
 src/w-music/              WinUI 3 应用
-  App.* / MainWindow.*    应用入口 + 导航（发现 / 在线发现 / 我的音乐 / 正在播放）+ 底部播放条 + 系统托盘
-  Models.*  Models/       TrackItem / PlaylistItem / LyricLineItem / OnlineTrackItem / QualityChipItem（XAML 可绑定）
-  ViewModels.*  ViewModels/  PlayerViewModel / LibraryViewModel
+  App.* / MainWindow.*    应用入口 + 导航（发现 / 个性推荐 / 在线发现 / 我的音乐 / 正在播放）+ 底部播放条 + 系统托盘
+  Models.*  Models/       TrackItem / PlaylistItem / LyricLineItem / OnlineTrackItem / QualityChipItem /
+                          RecommendItem / CategoryItem（XAML 可绑定）
+  ViewModels.*  ViewModels/  PlayerViewModel / LibraryViewModel / RecommendViewModel
   Services/               LibraryService（扫描/持久化/歌单）、OnlineProviderService（在线源，含 QQ 直连）、
+                          RecommendService（本地推荐引擎进程管理 + HTTP 客户端）、
                           BuiltinProviders（内置 CC 授权源）、DiscoverSettings（设置/QQ 登录态持久化）、
                           TrayIcon（Shell_NotifyIcon 托盘）、AppPaths、Services（单例）
   Audio/WasapiLoopback.*  WASAPI loopback 采集线程
   Controls/SpectrumView.* 直接操作 Rectangle 的频谱绘制（不走绑定，省开销）
-  Views/                  DiscoverPage / OnlinePage / LibraryPage / NowPlayingPage
+  Views/                  DiscoverPage / RecommendPage / OnlinePage / LibraryPage / NowPlayingPage
 adapters/                 适配器模板与文档（真实适配器放外部目录，见下）
 tools/gen_assets.py       生成 MSIX 占位图标（历史保留）
 tools/gen_icon.ps1        生成 Assets\app.ico（窗口/托盘/任务栏图标）
@@ -47,6 +49,8 @@ just fast               # 复用已生成的投影，只重编（改 .cpp 时的
 just test               # 跑 core 单测
 just run                # 启动 build\w-music.exe（只运行，不构建）
 just launch             # 同 just run（别名）
+just workshop-deploy    # Release 构建 → 部署到 C:\workshop\w-music-<版本> → 启动
+just deploy-workshop    # 同 workshop-deploy（别名）
 just gen                # 强制重生成 C++/WinRT 投影后再构建（改过 .idl 时用）
 just clean              # 删掉 build\（下次全量重生成，约 2 分钟）
 just clean-soft         # 只删 obj / exe / 日志，保留上千个投影头文件
@@ -55,7 +59,7 @@ just tools              # 只打印探到的工具链路径
 
 `justfile` 只是**最顶层入口**，每个 recipe 都把开关转发给 `build.ps1` → `tools\dev-build.ps1`，
 后者是构建逻辑的唯一出处。两个 ps1 也都还能直接用：
-`.\build.ps1 [-NoGen] [-NoTests] [-Clean] [-ListOnly]`。整条链路是**纯 PowerShell + Ninja**——
+`.\build.ps1 [-NoGen] [-NoTests] [-Clean] [-Release] [-ListOnly]`。整条链路是**纯 PowerShell + Ninja**——
 不用 MSBuild、不用 .bat、不用 vcvars、也不经 git-bash。
 
 脚本自己用 `Microsoft.VisualStudio.DevShell.dll`（纯 PowerShell）进 VS 环境，
@@ -73,6 +77,29 @@ just tools              # 只打印探到的工具链路径
 > `build\gen\component\w_music\*.xaml.g.h` 与 XBF，非打包 WinUI 3 应用可正常构建运行。
 > 产物 `build\w-music.exe` 依赖已注册的 **WindowsAppRuntime 2.3.1 框架包**（引导程序找不到会弹框提示）。
 > `just run` 只启动界面（不构建），构建和单测分别用 `just build` / `just test`。
+
+### Release 构建与工作台部署（`just workshop-deploy`）
+
+```powershell
+just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\workshop\w-music-<版本> → 启动
+```
+
+- `just build` 是**未优化**的 Debug 配置（`cl.exe` 不给 `/O` 就是 `/Od`）；`just workshop-deploy` 走
+  `-Release`（`/O2 /Oi /Gy /DNDEBUG`），也就是 `.\build.ps1 -Release`。两套配置共用 `build\` 与同一份
+  obj 文件名（这里没有 MSBuild 的 Debug/Release 输出目录），所以**切换配置 = 整树重编**：ninja 靠命令行
+  变化自己发现，脚本额外打一行 `config : Release (was Debug …)` 把这件事说出来。
+- 版本号只有一处：仓库根的 **`version.txt`**。`just workshop-deploy` **先**把它 patch +1、同步进
+  `Package.appxmanifest` / `app.manifest` 的身份版本，**再**构建——顺序不能换：`tools\dev-build.ps1`
+  用它的值生成 `build\obj\version.rc`，把版本作为 VERSIONINFO 资源嵌进 exe。先构建后改号的话，
+  `C:\workshop\w-music-<版本>` 里的二进制会报着上一个版本号，之后分不清哪个目录是哪个构建；
+  部署收尾会把目录名和 `(Get-Item w-music.exe).VersionInfo` 对一遍。
+- 目录里装的是**能跑起来所需的全部文件**（非打包 WinUI 3 应用按 exe 所在目录解析一切，没有包可读）：
+  `w-music.exe`、`Microsoft.WindowsAppRuntime.Bootstrap.dll`（exe 按名字导入它，系统只搜 exe 目录与
+  系统路径，不会去 NuGet 缓存里找）、`app.ico`（窗口/托盘图标按路径加载）、`w_music\*.xbf`
+  （每个 `InitializeComponent()` 都走 `ms-appx:///w_music/<页>.xaml`，而 `ms-appx:///` 就是 exe 目录）。
+  用户数据（`library.json` / `settings.json` / `providers`）仍在 `%LOCALAPPDATA%\w-music`，换构建不动它。
+- 同一个版本再部署会先复制到临时目录，校验通过后再替换正式目录（免得上一版删掉的页面 `.xbf` 残留成幽灵页面）；
+  若那个目录里的 `w-music.exe` 正在运行，脚本会直接拒绝并提示先从托盘退出，而不是删一半。
 
 首次启动 → 发现页点 **添加音乐文件夹** → 选你的音乐目录 → 递归扫描并读取 `MusicProperties` 元数据建库。
 
@@ -114,6 +141,37 @@ just tools              # 只打印探到的工具链路径
 - LRC 解析支持：`[mm:ss.xx]`、`[mm:ss]`、`[mm:ss:xx]`、一行多时间标签、`[offset:±ms]`、`<mm:ss.xx>` 增强逐字标签（自动剥离）、UTF-8 / UTF-16(BOM) / 换行符混合。
 - 自动查找歌词：音乐文件同目录同名 `.lrc` → `lyrics\` 子目录 → 同名子目录。
 - 实时高亮 + 自动居中滚动；**点击任意行跳转到该时间点**；`±0.5s` 微调整体偏移、可重置。
+
+### 5. 个性推荐（本地 MIR 引擎）
+- 引擎是独立仓库 **[music-recommend](https://github.com/PT123123/music-recommend)**
+  （`git@github.com:PT123123/music-recommend.git`）：对本地 MP3/WAV 做 MIR 特征提取
+  （MFCC / 色度 / 节奏 / 和声 / 人声 / 结构）→ SQLite + FAISS → 歌曲相似 / 固定曲风 / 带时间衰减的动态 Feed，
+  **全部来自音频分析，不是平台热榜或人工标签**。
+- w-music 通过 `Services/RecommendService` 以**子进程**方式拉起引擎的 FastAPI 服务
+  （`<引擎目录>\.venv\Scripts\python.exe scripts\run_server.py --port 26128`，仅监听 127.0.0.1），
+  并挂到 kill-on-close 的 Job Object 上——w-music 退出引擎随之退出，端口上已有健康引擎时直接复用。
+- 「**个性推荐**」页提供四类入口，全部走引擎同一套「库内分位」打分路径：
+  - **动态 Feed**（**为你推荐** / **换一批**）：带时间衰减的口味画像；
+  - **曲风分类**：引擎 `categories.yaml` 的 **22 条预设**（高能量 / 低刺激 / 强节奏 / 明亮音色 / 极致高音女声 /
+    低沉人声 / 纯音乐 / 慢速抒情 / 说唱感…），chips 自动换行；
+  - **本曲库里自动发现的类别**（`auto-*`）：引擎在分位空间上做 KMeans，k 由轮廓系数在 [4,12] 中选，
+    每簇 ≥ max(4, 4%×库)，查询目标直接来自簇质心；chip 上标成员数，标题行写 `k / 轮廓系数`，
+    「分析曲库」完成后自动重取（曲库换了类别跟着重标定）；
+  - **按描述找**：一句中文（如「安静又明亮的纯音乐」「不要快节奏」）交给引擎的 142 词词表做最长匹配，
+    否定会翻转目标分位。
+  另有 **与我正在听的相似**（以当前播放曲目为种子）、**分析曲库**（把「发现音乐」里添加的文件夹交给引擎
+  增量分析：新增 43s/首、重扫跳过不变文件）。
+- 每行推荐带**匹配度**（引擎归一化分数）与**推荐理由**（真实计算的分组相似度）；点行即播（整列表为队列），
+  **喜欢 / 不喜欢 / 播放**会通过 `/v1/feed/feedback` 回传引擎，逐步收紧口味画像。文件自带 tag 时另起一行
+  显示「文件标签：曲风 · 语种」——那是文件自己的声明，不是音频分析出的结论。
+- 列表下方固定挂一条**诚实说明**（引擎每次类别回答都随结果返回的元数据）：落点在库里覆盖多少首
+  （`support` / `low_support`，低于门槛时写明「这是按目标凑出来的排名，不是这类歌有这么多」）、实际生效的
+  硬过滤及其中哪些只是阈值化**估计**（人声 / 纯音乐判定实测不可靠）、被忽略或无数据可排的维度、写错了的
+  过滤条件（只报告不生效），以及文本查询里**答不了的词与原因**（情绪词没有本地测量支撑、语种/曲风无 tag
+  可比对时不做近似猜测，改走 `genre_proxies` / `vocal_proxies` 会注明是听感近似）。
+- 引擎目录解析顺序：环境变量 `WMUSIC_RECOMMEND_DIR` → `settings.json` 的 `recommendServerDir` →
+  `<桌面>\music-recommend`；端口可用 `recommendServerPort` 覆盖（默认 26128）。
+
 
 ## 频谱是怎么接的
 

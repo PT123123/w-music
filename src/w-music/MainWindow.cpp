@@ -3,7 +3,9 @@
 #include "MainWindow.h"
 #include "MainWindow.g.cpp"
 
+#include "Services/AppPaths.h"
 #include "Services/DiscoverSettings.h"
+#include "Services/RecommendService.h"
 #include "Services/Services.h"
 
 #include <cstdint>
@@ -13,6 +15,9 @@
 #include "Views/LibraryPage.h"
 #include "Views/NowPlayingPage.h"
 #include "Views/OnlinePage.h"
+#include "Views/RecommendPage.h"
+
+#include <winver.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Dispatching;
@@ -33,6 +38,41 @@ namespace
             return std::filesystem::current_path();
         }
         return std::filesystem::path{ buffer }.parent_path();
+    }
+
+    std::wstring ExeVersion()
+    {
+        wchar_t path[MAX_PATH]{};
+        const DWORD written = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        if (written == 0 || written >= MAX_PATH)
+        {
+            return L"未知";
+        }
+
+        DWORD ignored = 0;
+        const DWORD size = GetFileVersionInfoSizeW(path, &ignored);
+        if (size == 0)
+        {
+            return L"未知";
+        }
+
+        std::vector<unsigned char> data(size);
+        if (!GetFileVersionInfoW(path, ignored, size, data.data()))
+        {
+            return L"未知";
+        }
+
+        VS_FIXEDFILEINFO* info = nullptr;
+        UINT length = 0;
+        if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<LPVOID*>(&info), &length) || info == nullptr)
+        {
+            return L"未知";
+        }
+
+        return std::to_wstring(HIWORD(info->dwFileVersionMS)) + L"." +
+               std::to_wstring(LOWORD(info->dwFileVersionMS)) + L"." +
+               std::to_wstring(HIWORD(info->dwFileVersionLS)) + L"." +
+               std::to_wstring(LOWORD(info->dwFileVersionLS));
     }
 
     // -----------------------------------------------------------------------
@@ -164,7 +204,10 @@ namespace winrt::w_music::implementation
 {
     MainWindow::MainWindow()
     {
+        wm::app::SetUiThread();
+        wm::app::Diag("app start");
         InitializeComponent();
+        VersionText().Text(std::wstring{ L"版本 v" } + ExeVersion());
 
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(AppTitleBar());
@@ -227,6 +270,7 @@ namespace winrt::w_music::implementation
 
     void MainWindow::OnLoaded(Windows::Foundation::IInspectable const&, RoutedEventArgs const&)
     {
+        wm::app::Diag("loaded enter");
         using namespace winrt::w_music::implementation;
         wm::app::LibraryVm().InitializeAsync(AppWindow().Id());
         NavView().SelectedItem(DiscoverNavItem());
@@ -247,15 +291,82 @@ namespace winrt::w_music::implementation
             // Icon is cosmetic; never fail startup over it.
         }
         const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(AppWindow().Id());
-        if (m_trayIcon.Initialize(hwnd, iconPath))
+        if (m_trayIcon.Initialize(hwnd, iconPath,
+                                  [this] { ShowFromTray(); },
+                                  [this] { ExitApp(); }))
         {
+            m_trayReady = true;
+            wm::app::Diag("tray ready");
             Closed({ this, &MainWindow::OnWindowClosed });
+            // 关窗（X / Alt+F4 / 任务栏关闭）先经过这里：非退出意图就取消，
+            // 把窗口收进托盘，播放继续。
+            AppWindow().Closing({ this, &MainWindow::OnAppWindowClosing });
         }
     }
 
     void MainWindow::OnWindowClosed(Windows::Foundation::IInspectable const&, WindowEventArgs const&)
     {
         m_trayIcon.Destroy();
+        // Belt and braces: the engine's kill-on-close job object already ends
+        // the Python child whenever this process dies; this is the tidy path.
+        wm::app::Recommend().Shutdown();
+    }
+
+    void MainWindow::OnAppWindowClosing(Microsoft::UI::Windowing::AppWindow const&,
+                                        Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args)
+    {
+        if (m_exitRequested || !m_trayReady)
+        {
+            return;
+        }
+        // 系统关机/注销时不拦（拦了也只会被 Windows 强杀）。
+        if (GetSystemMetrics(SM_SHUTTINGDOWN))
+        {
+            return;
+        }
+        args.Cancel(true);
+        HideToTray();
+    }
+
+    void MainWindow::HideToTray()
+    {
+        wm::app::Diag("hide to tray");
+        try
+        {
+            AppWindow().Hide();
+        }
+        catch (...)
+        {
+            const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(AppWindow().Id());
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
+    void MainWindow::ShowFromTray()
+    {
+        wm::app::Diag("show from tray");
+        try
+        {
+            auto appWindow = AppWindow();
+            const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(appWindow.Id());
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            appWindow.Show(true);
+            SetForegroundWindow(hwnd);
+        }
+        catch (...)
+        {
+            wm::app::Diag("show from tray exception");
+        }
+    }
+
+    void MainWindow::ExitApp()
+    {
+        wm::app::Diag("exit app");
+        m_exitRequested = true;
+        Close();
     }
 
     void MainWindow::NavigateTo(hstring const& tag)
@@ -263,6 +374,10 @@ namespace winrt::w_music::implementation
         if (tag == L"discover")
         {
             ContentFrame().Navigate(winrt::xaml_typename<w_music::DiscoverPage>());
+        }
+        else if (tag == L"recommend")
+        {
+            ContentFrame().Navigate(winrt::xaml_typename<w_music::RecommendPage>());
         }
         else if (tag == L"online")
         {

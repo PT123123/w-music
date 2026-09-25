@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace wm::core {
@@ -88,8 +89,10 @@ public:
 
 private:
     static std::string NewId();
+    void RebuildTrackIndex();
 
     LibraryData data_;
+    std::unordered_map<std::string, std::size_t> m_trackIndex;
 };
 
 } // namespace wm::core

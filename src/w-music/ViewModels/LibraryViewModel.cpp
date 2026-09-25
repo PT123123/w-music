@@ -3,6 +3,7 @@
 #include "ViewModels/LibraryViewModel.h"
 #include "ViewModels/LibraryViewModel.g.cpp"
 
+#include "Services/AppPaths.h"
 #include "Services/LibraryService.h"
 #include "Services/Services.h"
 #include "ViewModels/PlayerViewModel.h"
@@ -10,6 +11,24 @@
 using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
+
+namespace
+{
+    std::string FormatHr(winrt::hresult hr)
+    {
+        char buf[16]{};
+        snprintf(buf, sizeof(buf), "0x%08X", static_cast<uint32_t>(static_cast<int32_t>(hr)));
+        return buf;
+    }
+
+    // True for the known wrong-thread RPC error when the library actually
+    // grew: the scan/import completed, only a final XAML touch failed.
+    bool IsWrongThreadAfterSuccess(winrt::hresult hr, uint32_t tracksBefore)
+    {
+        return static_cast<int32_t>(hr) == RPC_E_WRONG_THREAD &&
+               wm::app::Library().Tracks().Size() > tracksBefore;
+    }
+}
 
 namespace winrt::w_music::implementation
 {
@@ -27,6 +46,17 @@ namespace winrt::w_music::implementation
 
     void LibraryViewModel::RaisePropertyChanged(std::wstring_view const& name)
     {
+        if (!wm::app::UiThread())
+        {
+            wm::app::Diag("LV Raise off-ui: " + wm::app::Utf8(name));
+            wm::app::PostToUi([weak = get_weak(), text = std::wstring{ name }] {
+                if (auto self = weak.get())
+                {
+                    self->RaisePropertyChanged(text);
+                }
+            });
+            return;
+        }
         m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
     }
 
@@ -83,42 +113,164 @@ namespace winrt::w_music::implementation
 
         m_isScanning = true;
         RaisePropertyChanged(L"IsScanning");
-        SetStatus(hstring{ L"正在扫描本地曲库…" });
+        SetStatus(hstring{ L"正在快速扫描本地音乐文件…" });
 
-        const int scanned = co_await library.RescanAsync();
+        const auto tracksBefore = library.Tracks().Size();
+        int scanned = 0;
+        std::wstring error;
+        try
+        {
+            auto lifetime = get_strong();
+            scanned = co_await library.RescanAsync([this, lifetime](int count) {
+                RefreshDiscover();
+                SetStatus(hstring{ L"已扫描 " + std::to_wstring(count) + L" 首，继续导入…" });
+            });
+        }
+        catch (hresult_error const& exception)
+        {
+            wm::app::Diag(std::string{ "Init catch hr=" } + FormatHr(exception.code()) +
+                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
+            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+            {
+                wm::app::Diag("Init: wrong-thread error after successful scan, reporting success");
+                scanned = static_cast<int>(library.Tracks().Size() - tracksBefore);
+            }
+            else
+            {
+                error = L"扫描失败：" + std::wstring{ exception.message().c_str() };
+            }
+        }
+        catch (...)
+        {
+            wm::app::Diag("Init catch(...)");
+            error = L"扫描失败，请重新添加文件夹。";
+        }
 
+        co_await wm::app::ResumeOnUi();
+        if (error.empty())
+        {
+            RefreshDiscover();
+            SetStatus(hstring{ L"曲库共 " + std::to_wstring(static_cast<int>(m_tracks.Size())) + L" 首，本次处理 " + std::to_wstring(scanned) + L" 个文件" });
+        }
+        else
+        {
+            SetStatus(hstring{ error });
+        }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
-        RefreshDiscover();
-        SetStatus(hstring{ L"曲库共 " + std::to_wstring(static_cast<int>(m_tracks.Size())) + L" 首，本次处理 " + std::to_wstring(scanned) + L" 个文件" });
     }
 
     IAsyncAction LibraryViewModel::AddFolderAsync()
     {
+        if (m_isScanning)
+        {
+            co_return;
+        }
         m_isScanning = true;
         RaisePropertyChanged(L"IsScanning");
-        SetStatus(hstring{ L"正在扫描…" });
+        SetStatus(hstring{ L"正在快速扫描本地音乐文件…" });
 
-        const int scanned = co_await wm::app::Library().PickAndAddFolderAsync(m_windowId);
+        const auto tracksBefore = wm::app::Library().Tracks().Size();
+        int scanned = 0;
+        std::wstring error;
+        try
+        {
+            auto lifetime = get_strong();
+            scanned = co_await wm::app::Library().PickAndAddFolderAsync(
+                m_windowId,
+                [this, lifetime](int count) {
+                    m_trackCount = static_cast<int32_t>(wm::app::Library().Tracks().Size());
+                    RaisePropertyChanged(L"TrackCount");
+                    SetStatus(hstring{ L"已扫描 " + std::to_wstring(count) + L" 首，继续导入…" });
+                });
+        }
+        catch (hresult_error const& exception)
+        {
+            wm::app::Diag(std::string{ "AddFolder catch hr=" } + FormatHr(exception.code()) +
+                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
+            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+            {
+                wm::app::Diag("AddFolder: wrong-thread error after successful import, reporting success");
+                scanned = static_cast<int>(wm::app::Library().Tracks().Size() - tracksBefore);
+            }
+            else
+            {
+                error = L"导入失败：" + std::wstring{ exception.message().c_str() };
+            }
+        }
+        catch (...)
+        {
+            wm::app::Diag("AddFolder catch(...)");
+            error = L"导入失败，请重新选择文件夹。";
+        }
 
+        co_await wm::app::ResumeOnUi();
+        if (error.empty())
+        {
+            RefreshDiscover();
+            SetStatus(hstring{ L"新增 " + std::to_wstring(scanned) + L" 首歌曲，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
+        }
+        else
+        {
+            SetStatus(hstring{ error });
+        }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
-        RefreshDiscover();
-        SetStatus(hstring{ L"新增 " + std::to_wstring(scanned) + L" 首歌曲，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
     }
 
     IAsyncAction LibraryViewModel::RescanAsync()
     {
+        if (m_isScanning)
+        {
+            co_return;
+        }
         m_isScanning = true;
         RaisePropertyChanged(L"IsScanning");
-        SetStatus(hstring{ L"正在重新扫描…" });
+        SetStatus(hstring{ L"正在快速扫描本地音乐文件…" });
 
-        const int scanned = co_await wm::app::Library().RescanAsync();
+        const auto tracksBefore = wm::app::Library().Tracks().Size();
+        int scanned = 0;
+        std::wstring error;
+        try
+        {
+            auto lifetime = get_strong();
+            scanned = co_await wm::app::Library().RescanAsync([this, lifetime](int count) {
+                RefreshDiscover();
+                SetStatus(hstring{ L"已扫描 " + std::to_wstring(count) + L" 首，继续导入…" });
+            });
+        }
+        catch (hresult_error const& exception)
+        {
+            wm::app::Diag(std::string{ "Rescan catch hr=" } + FormatHr(exception.code()) +
+                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
+            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+            {
+                wm::app::Diag("Rescan: wrong-thread error after successful scan, reporting success");
+                scanned = static_cast<int>(wm::app::Library().Tracks().Size() - tracksBefore);
+            }
+            else
+            {
+                error = L"扫描失败：" + std::wstring{ exception.message().c_str() };
+            }
+        }
+        catch (...)
+        {
+            wm::app::Diag("Rescan catch(...)");
+            error = L"扫描失败，请重新添加文件夹。";
+        }
 
+        co_await wm::app::ResumeOnUi();
+        if (error.empty())
+        {
+            RefreshDiscover();
+            SetStatus(hstring{ L"扫描完成，处理 " + std::to_wstring(scanned) + L" 个文件，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
+        }
+        else
+        {
+            SetStatus(hstring{ error });
+        }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
-        RefreshDiscover();
-        SetStatus(hstring{ L"扫描完成，处理 " + std::to_wstring(scanned) + L" 个文件，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
     }
 
     void LibraryViewModel::CreatePlaylist(hstring const& name)

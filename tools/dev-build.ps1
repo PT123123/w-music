@@ -41,17 +41,23 @@
 .PARAMETER NoTests
     Skips running the core test executables.
 
+.PARAMETER Release
+    Builds the optimized configuration (/O2 /Oi /Gy /DNDEBUG) instead of the
+    default unoptimized one. This is what `just workshop-deploy` deploys; see
+    tools\workshop-deploy.ps1 for why the version is bumped before the build.
+
 .PARAMETER ListOnly
     Prints the resolved tools and exits.
 
 .NOTES
-    Usage:  pwsh -NoProfile -File tools\dev-build.ps1 [-Clean] [-NoTests]
+    Usage:  pwsh -NoProfile -File tools\dev-build.ps1 [-Clean] [-NoTests] [-Release]
 #>
 param(
     [switch]$Clean,
     [switch]$NoGen,
     [switch]$NoLink,
     [switch]$NoTests,
+    [switch]$Release,
     [switch]$ListOnly
 )
 
@@ -75,6 +81,27 @@ $SrcDir  = Join-Path $Root 'src\w-music'
 $CoreDir = Join-Path $Root 'core'
 $BuildDir = Join-Path $Root 'build'
 $GenDir  = Join-Path $BuildDir 'gen'
+
+# ---------------------------------------------------------------------------
+# Release version: version.txt at the repo root.
+#
+# Read here (not only by the deploy script) because the version is baked into the
+# exe as a VERSIONINFO resource -- see the obj\version.rc generated below. Without
+# that, C:\workshop\w-music-<ver> would be a folder name nothing inside the binary
+# backs up, and two builds of the same version would be indistinguishable.
+#
+# Strict on purpose: version.txt is the only place a release version is typed.
+# ---------------------------------------------------------------------------
+$versionFile = Join-Path $Root 'version.txt'
+
+function Get-AppVersion {
+    if (-not (Test-Path $versionFile)) { throw "version.txt not found: $versionFile" }
+    $text = (Get-Content $versionFile -Raw).Trim()
+    if ($text -notmatch '^\d+\.\d+\.\d+$') {
+        throw "version.txt must hold a plain x.y.z version, got '$text'"
+    }
+    return $text
+}
 
 . (Join-Path $PSScriptRoot 'xaml-markup.ps1')
 
@@ -371,7 +398,7 @@ $mergedHdr = Join-Path $winmdDir 'w-music.h'
 $genComponent = Join-Path $GenDir 'component'
 $xamlDir = Join-Path $GenDir 'xaml'
 $foundationWinmd = Join-Path $GenDir 'wf\Windows.Foundation.winmd'
-$pages = @('DiscoverPage', 'LibraryPage', 'NowPlayingPage', 'OnlinePage')
+$pages = @('DiscoverPage', 'RecommendPage', 'LibraryPage', 'NowPlayingPage', 'OnlinePage')
 $xamlNameOrder = @('App', 'MainWindow') + $pages
 
 if (-not $NoGen) {
@@ -380,7 +407,8 @@ if (-not $NoGen) {
     # Compile order is irrelevant here: midlrt sees one translation unit with all
     # sources #included, in this order (dependencies first, for clarity only).
     $idlOrder = @('Models.idl', 'ViewModels.idl',
-                  'Views\DiscoverPage.idl', 'Views\LibraryPage.idl',
+                  'Views\DiscoverPage.idl', 'Views\RecommendPage.idl',
+                  'Views\LibraryPage.idl',
                   'Views\NowPlayingPage.idl', 'Views\OnlinePage.idl',
                   'App.idl', 'MainWindow.idl')
     $idlPaths = @($idlOrder | ForEach-Object { Join-Path $SrcDir $_ })
@@ -449,11 +477,14 @@ if (-not $NoGen) {
         'App' = 'App.h'; 'MainWindow' = 'MainWindow.h'
         # The markup compiler's own provider header carries the factory glue.
         'XamlMetaDataProvider' = 'w_music\XamlMetaDataProvider.h'
-        'DiscoverPage' = 'Views\DiscoverPage.h'; 'LibraryPage' = 'Views\LibraryPage.h'
+        'DiscoverPage' = 'Views\DiscoverPage.h'; 'RecommendPage' = 'Views\RecommendPage.h'
+        'LibraryPage' = 'Views\LibraryPage.h'
         'NowPlayingPage' = 'Views\NowPlayingPage.h'; 'OnlinePage' = 'Views\OnlinePage.h'
         'LibraryViewModel' = 'ViewModels\LibraryViewModel.h'; 'PlayerViewModel' = 'ViewModels\PlayerViewModel.h'
+        'RecommendViewModel' = 'ViewModels\RecommendViewModel.h'
         'LyricLineItem' = 'Models\LyricLineItem.h'; 'OnlineTrackItem' = 'Models\OnlineTrackItem.h'
         'PlaylistItem' = 'Models\PlaylistItem.h'; 'QualityChipItem' = 'Models\QualityChipItem.h'
+        'RecommendItem' = 'Models\RecommendItem.h'; 'CategoryItem' = 'Models\CategoryItem.h'
         'TrackItem' = 'Models\TrackItem.h'
     }
     $bridges = 0
@@ -488,7 +519,8 @@ $tuDir = Join-Path $GenDir 'xamltu'
 $tuSources = @()
 $tuMap = [ordered]@{
     'App' = 'App.h'; 'MainWindow' = 'MainWindow.h'
-    'DiscoverPage' = 'Views\DiscoverPage.h'; 'LibraryPage' = 'Views\LibraryPage.h'
+    'DiscoverPage' = 'Views\DiscoverPage.h'; 'RecommendPage' = 'Views\RecommendPage.h'
+    'LibraryPage' = 'Views\LibraryPage.h'
     'NowPlayingPage' = 'Views\NowPlayingPage.h'; 'OnlinePage' = 'Views\OnlinePage.h'
 }
 foreach ($cls in $tuMap.Keys) {
@@ -509,13 +541,18 @@ $appSources = @(
     'pch.cpp', 'App.cpp', 'MainWindow.cpp',
     'Models\TrackItem.cpp', 'Models\PlaylistItem.cpp', 'Models\LyricLineItem.cpp',
     'Models\OnlineTrackItem.cpp', 'Models\QualityChipItem.cpp',
+    'Models\RecommendItem.cpp', 'Models\CategoryItem.cpp',
     'ViewModels\PlayerViewModel.cpp', 'ViewModels\LibraryViewModel.cpp',
+    'ViewModels\RecommendViewModel.cpp',
     'Services\AppPaths.cpp', 'Services\LibraryService.cpp',
     'Services\OnlineProviderService.cpp', 'Services\BuiltinProviders.cpp',
-    'Services\DiscoverSettings.cpp', 'Services\Services.cpp', 'Services\TrayIcon.cpp',
+    'Services\DiscoverSettings.cpp', 'Services\RecommendService.cpp',
+    'Services\Services.cpp', 'Services\TrayIcon.cpp',
+    'Services\SingleInstance.cpp',
     'Controls\SpectrumView.cpp', 'Audio\WasapiLoopback.cpp',
     'Audio\EqualizedSource.cpp',
-    'Views\DiscoverPage.cpp', 'Views\LibraryPage.cpp',
+    'Views\DiscoverPage.cpp', 'Views\RecommendPage.cpp',
+    'Views\LibraryPage.cpp',
     'Views\NowPlayingPage.cpp', 'Views\OnlinePage.cpp'
 )
 
@@ -548,11 +585,14 @@ Write-Host "gcpp     : $gcppSeen stand-ins ($gcppWritten written)"
 # the project headers; here it needs a unit that pulls them all in first.
 $typeInfoHeaders = @(
     'App.h', 'MainWindow.h',
-    'Views\DiscoverPage.h', 'Views\LibraryPage.h',
+    'Views\DiscoverPage.h', 'Views\RecommendPage.h',
+    'Views\LibraryPage.h',
     'Views\NowPlayingPage.h', 'Views\OnlinePage.h',
     'ViewModels\LibraryViewModel.h', 'ViewModels\PlayerViewModel.h',
+    'ViewModels\RecommendViewModel.h',
     'Models\TrackItem.h', 'Models\PlaylistItem.h', 'Models\LyricLineItem.h',
     'Models\OnlineTrackItem.h', 'Models\QualityChipItem.h',
+    'Models\RecommendItem.h', 'Models\CategoryItem.h',
     'w_music\XamlMetaDataProvider.h'
 )
 $typeInfoText = [System.Text.StringBuilder]::new()
@@ -609,10 +649,34 @@ $sdkIncludes = @('um', 'shared', 'ucrt', 'cppwinrt', 'winrt') |
     ForEach-Object { "/I`"$sdkInc\$_`"" }
 $wasdkIncludes = $wasdkIncludeDirs | ForEach-Object { "/I`"$_`"" }
 $includes = ($relIncludes + $wasdkIncludes + $sdkIncludes) -join ' '
+
+# ---------------------------------------------------------------------------
+# Configuration. No MSBuild here, so no Debug/Release output directories: the
+# flags *are* the configuration, and both configurations share build\ and its
+# object names. Switching therefore recompiles every unit -- ninja works that out
+# by itself, because the compile command line it recorded in build\ .ninja_log
+# changed -- which is why the switch is announced rather than happening silently.
+#
+# cl.exe's default with no /O switch is /Od, so plain `just build` stays the
+# unoptimized inner loop it has always been; `just workshop-deploy` builds
+# -Release, the configuration that gets deployed.
+# ---------------------------------------------------------------------------
+$configName = if ($Release) { 'Release' } else { 'Debug' }
+$configFlags = if ($Release) { ' /O2 /Oi /Gy /DNDEBUG' } else { '' }
+# Written after a successful build (see the report), so it describes what build\
+# really holds rather than what was asked for.
+$configMarker = Join-Path $BuildDir 'config.txt'
+if (Test-Path $configMarker) {
+    $previousConfig = (Get-Content $configMarker -Raw).Trim()
+    if ($previousConfig -ne $configName) {
+        Write-Host "config   : $configName (was $previousConfig -- ninja recompiles every unit)" -ForegroundColor Yellow
+    }
+}
+
 # MICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP selects the framework-dependent
 # branch in WindowsAppRuntimeAutoInitializer.cpp; the bootstrap auto-initializer
 # itself also keys off it (see WindowsAppSDK-Nuget-Native.Bootstrap.targets).
-$cppFlags = '/std:c++20 /EHsc /utf-8 /bigobj /W3 /permissive- /D_UNICODE /DUNICODE /DWINRT_LEAN_AND_MEAN /D_VSDESIGNER_DONT_LOAD_AS_DLL /DMICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP=1'
+$cppFlags = '/std:c++20 /EHsc /utf-8 /bigobj /W3 /permissive- /D_UNICODE /DUNICODE /DWINRT_LEAN_AND_MEAN /D_VSDESIGNER_DONT_LOAD_AS_DLL /DMICROSOFT_WINDOWSAPPSDK_AUTOINITIALIZE_BOOTSTRAP=1' + $configFlags
 # Microsoft.WindowsAppRuntime.Bootstrap.lib supplies MddBootstrapInitialize2 /
 # MddBootstrapShutdown and is what makes the exe import the bootstrapper DLL.
 # Nothing here needs Microsoft.WindowsAppRuntime.lib -- that one belongs to the
@@ -624,8 +688,8 @@ $linkLibs = @('windowsapp.lib',
               'Microsoft.WindowsAppRuntime.Bootstrap.lib',
               'ole32.lib', 'oleaut32.lib', 'uuid.lib', 'runtimeobject.lib',
               'shell32.lib', 'shlwapi.lib', 'propsys.lib', 'user32.lib',
-              'gdi32.lib', 'd3d11.lib', 'dxgi.lib', 'windowscodecs.lib',
-              'bcrypt.lib',
+               'gdi32.lib', 'd3d11.lib', 'dxgi.lib', 'windowscodecs.lib',
+               'bcrypt.lib', 'version.lib',
               # Equalizer decode proxy (Audio\EqualizedSource.cpp): MFStartup /
               # source reader / GUIDs like MFAudioFormat_Float.
               'mfplat.lib', 'mfreadwrite.lib', 'mfuuid.lib') -join ' '
@@ -708,18 +772,71 @@ foreach ($full in $generatedSources) {
     $appObjs += $obj
 }
 
+# version.txt is the single source of truth for the release version: the deploy
+# script names C:\workshop\w-music-<ver> after it, and the VERSIONINFO resource
+# generated below bakes the same string into the exe -- so the folder name can be
+# read back out of the binary instead of being taken on trust.
+$appVersion = Get-AppVersion
+
 if (-not $NoLink) {
+    # Resources, in two files: the icon (Assets\app.rc, hand-written) and the
+    # VERSIONINFO block (version.rc, generated here from version.txt).
+    $resourceObjs = @()
+
     # The app icon resource (.ico embedded via rc.exe) feeds the task manager and
     # the shell's icon for the exe; the runtime path uses the same .ico file.
-    $appRes = 'obj\w-music.res'
     $appRc = Join-Path $SrcDir 'Assets\app.rc'
     if (Test-Path $appRc) {
-        [void]$edges.AppendLine("build ${appRes}: rc $(NinjaPath $appRc)")
+        [void]$edges.AppendLine("build obj\w-music.res: rc $(NinjaPath $appRc)")
+        $resourceObjs += 'obj\w-music.res'
     }
-    else {
-        $appRes = ''
+
+    # Generated rather than hand-written so version.txt remains the only place a
+    # release version is typed -- a second copy in a checked-in .rc would drift.
+    # Written only when the text changes (see Write-GeneratedFile): this file is a
+    # link input, so bumping its mtime on every build would relink for nothing.
+    #
+    # "1 VERSIONINFO" is rc's numeric spelling of VS_VERSION_INFO (1 in winver.h),
+    # which keeps this file free of an #include -- rc.exe is run without the SDK
+    # include path on purpose.
+    $versionRc = Join-Path $objectDir 'version.rc'
+    $versionCsv = ($appVersion -split '\.') -join ','
+    $versionRcText = @"
+1 VERSIONINFO
+  FILEVERSION     $versionCsv,0
+  PRODUCTVERSION  $versionCsv,0
+  FILEFLAGSMASK   0x3fL
+  FILEFLAGS       0x0L
+  FILEOS          0x40004L
+  FILETYPE        0x1L
+  FILESUBTYPE     0x0L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "w-music"
+      VALUE "FileDescription", "w-music"
+      VALUE "FileVersion", "$appVersion"
+      VALUE "InternalName", "w-music"
+      VALUE "OriginalFilename", "w-music.exe"
+      VALUE "ProductName", "w-music"
+      VALUE "ProductVersion", "$appVersion"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"@
+    if (Write-GeneratedFile $versionRc $versionRcText) {
+        Write-Host "version  : $appVersion -> obj\version.rc (regenerated)"
     }
-    [void]$edges.AppendLine("build w-music.exe: linkapp $($appObjs -join ' ') $appRes $($coreObjs -join ' ')")
+    [void]$edges.AppendLine("build obj\version.res: rc $(NinjaPath $versionRc)")
+    $resourceObjs += 'obj\version.res'
+
+    [void]$edges.AppendLine("build w-music.exe: linkapp $($appObjs -join ' ') $($resourceObjs -join ' ') $($coreObjs -join ' ')")
     $defaults += 'w-music.exe'
 }
 [void]$edges.AppendLine("default $($defaults -join ' ')")
@@ -749,6 +866,11 @@ if (-not $NoTests) {
 
 if ($ninjaExit -ne 0) { throw "ninja failed (exit $ninjaExit); full output in build\ninja-out.txt" }
 
+# The build got this far, so build\ now really holds $configName objects: record
+# it for the next run's configuration-change notice. Written only when it changed,
+# like the generated sources, since it is not a build input.
+[void](Write-GeneratedFile $configMarker "$configName`n")
+
 # ---------------------------------------------------------------------------
 # 8. build report
 # ---------------------------------------------------------------------------
@@ -757,6 +879,7 @@ if (-not $NoLink) {
     $exe = Join-Path $BuildDir 'w-music.exe'
     if (Test-Path $exe) {
         Write-Host "exe      : $exe ($([math]::Round((Get-Item $exe).Length/1KB)) KB)"
+        Write-Host "config   : $configName, v$appVersion (VERSIONINFO embedded in the exe)"
     }
     else {
         Write-Host 'exe      : not produced' -ForegroundColor Yellow
@@ -797,6 +920,9 @@ if (-not $NoLink) {
     # destination from the XAML item's path relative to ProjectDir -- the two
     # agree only for projects whose XAML sits at the project root, which is why
     # this build cannot reuse that rule.
+    $markupOutput = Join-Path $BuildDir 'w_music'
+    if (Test-Path $markupOutput) { [IO.Directory]::Delete($markupOutput, $true) }
+    [IO.Directory]::CreateDirectory($markupOutput) | Out-Null
     $xbfDeployed = @{}
     foreach ($header in (Get-ChildItem $genComponent -Recurse -Filter '*.xaml.g.h*')) {
         $uriMatches = [regex]::Matches((Get-Content $header.FullName -Raw), 'ms-appx:///(?<p>[^"]+?)\.xaml')

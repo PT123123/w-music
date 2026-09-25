@@ -69,6 +69,19 @@ namespace wm::app
         void SetEqualizer(bool enabled, std::wstring const& preset, double preampDb,
                           std::array<double, EqBandCount> const& gainsDb);
 
+        /// ---- 本地推荐引擎（music-recommend）----
+        /// 引擎仓库目录：空 = 用默认位置（<桌面>\music-recommend），环境变量
+        /// WMUSIC_RECOMMEND_DIR 又优先于这里。引擎以子进程方式运行其 FastAPI
+        /// 服务（见 Services/RecommendService.h 与引擎仓库
+        /// https://github.com/PT123123/music-recommend）。
+        std::wstring RecommendServerDir() const noexcept { return m_recommendServerDir; }
+        void RecommendServerDir(std::wstring const& value);
+
+        /// 引擎 HTTP 端口，仅监听 127.0.0.1。
+        static constexpr unsigned short RecommendPortDefault = 26128;
+        unsigned short RecommendServerPort() const noexcept { return m_recommendServerPort; }
+        void RecommendServerPort(unsigned short value);
+
         static constexpr std::size_t MaxHistory = 12;
 
     private:
@@ -85,6 +98,8 @@ namespace wm::app
         std::wstring m_eqPreset{ L"flat" };
         double m_eqPreampDb = 0.0;
         std::array<double, EqBandCount> m_eqGains{};
+        std::wstring m_recommendServerDir;
+        unsigned short m_recommendServerPort = RecommendPortDefault;
     };
 
     DiscoverSettings& Settings();

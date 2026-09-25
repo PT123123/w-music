@@ -97,6 +97,17 @@ namespace winrt::w_music::implementation
 
     void PlayerViewModel::RaisePropertyChanged(std::wstring_view const& name)
     {
+        if (!wm::app::UiThread())
+        {
+            wm::app::Diag("PV Raise off-ui: " + wm::app::Utf8(name));
+            wm::app::PostToUi([weak = get_weak(), text = std::wstring{ name }] {
+                if (auto self = weak.get())
+                {
+                    self->RaisePropertyChanged(text);
+                }
+            });
+            return;
+        }
         m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
     }
 
@@ -134,37 +145,98 @@ namespace winrt::w_music::implementation
             return;
         }
 
+        if (m_dispatcher == nullptr)
+        {
+            m_dispatcher = DispatcherQueue::GetForCurrentThread();
+        }
+
         m_player = MediaPlayer();
         m_player.AudioCategory(MediaPlayerAudioCategory::Media);
         m_player.Volume(m_volume);
         m_player.IsMuted(m_isMuted);
 
-        m_mediaEndedToken = m_player.MediaEnded({ this, &PlayerViewModel::OnMediaEnded });
-
-        m_player.PlaybackSession().PlaybackStateChanged([weak = get_weak()](auto&&, auto&&) {
-            if (auto self = weak.get())
+        m_mediaEndedToken = m_player.MediaEnded([weak = get_weak(), dispatcher = m_dispatcher](MediaPlayer const&, IInspectable const&) {
+            // MediaPlayer raises events on an arbitrary thread; XAML property
+            // updates are only legal on the UI thread.
+            try
             {
-                const bool playing = self->m_player.PlaybackSession().PlaybackState() == MediaPlaybackState::Playing;
-                if (self->m_isPlaying != playing)
+                auto self = weak.get();
+                if (!self)
                 {
-                    self->m_isPlaying = playing;
-                    self->RaisePropertyChanged(L"IsPlaying");
+                    return;
                 }
+                if (dispatcher == nullptr || dispatcher.HasThreadAccess())
+                {
+                    self->HandleMediaEnded();
+                    return;
+                }
+                dispatcher.TryEnqueue([self = std::move(self)]() { self->HandleMediaEnded(); });
+            }
+            catch (...)
+            {
+            }
+        });
+
+        m_player.PlaybackSession().PlaybackStateChanged([weak = get_weak(), dispatcher = m_dispatcher](MediaPlaybackSession const&, auto&&) {
+            try
+            {
+                auto self = weak.get();
+                if (!self)
+                {
+                    return;
+                }
+                if (dispatcher == nullptr || dispatcher.HasThreadAccess())
+                {
+                    self->SyncPlayingState();
+                    return;
+                }
+                dispatcher.TryEnqueue([self = std::move(self)]() { self->SyncPlayingState(); });
+            }
+            catch (...)
+            {
             }
         });
     }
 
-    void PlayerViewModel::OnMediaEnded(MediaPlayer const&, IInspectable const&)
+    void PlayerViewModel::HandleMediaEnded()
     {
-        const auto next = m_queue.Next(true);
-        if (next.has_value())
+        wm::app::Diag("media ended");
+        try
         {
-            PlayTrackById(hstring{ wm::app::Utf16(*next) });
-            return;
-        }
+            const auto next = m_queue.Next(true);
+            if (next.has_value())
+            {
+                PlayTrackById(hstring{ wm::app::Utf16(*next) });
+                return;
+            }
 
-        m_isPlaying = false;
-        RaisePropertyChanged(L"IsPlaying");
+            m_isPlaying = false;
+            RaisePropertyChanged(L"IsPlaying");
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void PlayerViewModel::SyncPlayingState()
+    {
+        wm::app::Diag("state sync");
+        try
+        {
+            if (m_player == nullptr)
+            {
+                return;
+            }
+            const bool playing = m_player.PlaybackSession().PlaybackState() == MediaPlaybackState::Playing;
+            if (m_isPlaying != playing)
+            {
+                m_isPlaying = playing;
+                RaisePropertyChanged(L"IsPlaying");
+            }
+        }
+        catch (...)
+        {
+        }
     }
 
     void PlayerViewModel::TogglePlayPause()
@@ -248,101 +320,127 @@ namespace winrt::w_music::implementation
     winrt::fire_and_forget PlayerViewModel::StartPlaybackAsync(winrt::w_music::TrackItem track)
     {
         auto lifetime = get_strong();
-        EnsurePlayer();
-
-        if (m_currentTrack != nullptr)
-        {
-            m_currentTrack.IsPlaying(false);
-        }
-
-        m_currentTrack = track;
-        m_positionSeconds = 0.0;
-        m_durationSeconds = 0.0;
-        track.IsPlaying(true);
-
-        RaisePropertyChanged(L"CurrentTrack");
-        RaisePropertyChanged(L"HasTrack");
-        RaisePropertyChanged(L"Title");
-        RaisePropertyChanged(L"Artist");
-        RaisePropertyChanged(L"Album");
-        RaisePropertyChanged(L"IsFavorite");
-        RaisePropertyChanged(L"PositionSeconds");
-        RaisePropertyChanged(L"PositionText");
-        RaisePropertyChanged(L"DurationSeconds");
-        RaisePropertyChanged(L"DurationText");
-
-        std::wstring path{ track.FilePath().c_str() };
-        const bool remote = path.rfind(L"http://", 0) == 0 || path.rfind(L"https://", 0) == 0;
-
-        // EQ active: decode -> filter -> feed back through a MediaStreamSource
-        // proxy. Opening blocks (network!), so hop off the UI thread first; on
-        // any failure we simply continue with the plain source below.
-        bool eqBound = false;
-        if (m_eqEnabled)
-        {
-            auto eq = std::make_shared<wm::app::EqualizedSource>(m_equalizer, std::move(path));
-            co_await winrt::resume_background();
-            try
-            {
-                if (eq->Open())
-                {
-                    m_eqSource = std::move(eq);
-                    m_player.Source(MediaSource::CreateFromMediaStreamSource(m_eqSource->Source()));
-                    m_player.Play();
-                    eqBound = true;
-                }
-            }
-            catch (...)
-            {
-                eqBound = false;
-            }
-        }
-
-        if (!eqBound)
-        {
-            m_eqSource.reset();
-            try
-            {
-                if (remote)
-                {
-                    // Streamed straight from an online source (see OnlineProviderService).
-                    m_player.Source(MediaSource::CreateFromUri(winrt::Windows::Foundation::Uri{ track.FilePath() }));
-                }
-                else
-                {
-                    auto file = co_await StorageFile::GetFileFromPathAsync(track.FilePath());
-                    m_player.Source(MediaSource::CreateFromStorageFile(file));
-                }
-                m_player.Play();
-            }
-            catch (...)
-            {
-                // Unreadable / missing file: fall through so the next track can play.
-            }
-        }
-
-        ApplyPendingResume();
-
-        // Lyrics and play-count touch UI-bound collections; make sure we are
-        // back on the UI thread (the EQ branch above ran on a worker thread).
+        // Callers may arrive from background completion callbacks (downloads,
+        // media events); all state below is XAML-bound and UI-only.
+        wm::app::Diag("play enter");
         co_await ResumeToUi{ m_dispatcher };
+        try
+        {
+            EnsurePlayer();
 
-        if (!remote)
-        {
-            co_await LoadLyricAsync(track.Id());
-            wm::app::Library().MarkPlayed(track.Id());
-        }
-        else
-        {
-            // QQ online previews have a resolvable mid baked into their id; pull
-            // the LRC from QQ when logged in (or through the public endpoint) so
-            // the now-playing lyrics highlight works without a local file.
-            std::string const mid = QqMidFromTrack(track.Id());
-            if (!mid.empty())
+            if (m_currentTrack != nullptr)
             {
-                co_await winrt::resume_background();
-                LoadOnlineLyric(mid);
+                m_currentTrack.IsPlaying(false);
             }
+
+            m_currentTrack = track;
+            m_positionSeconds = 0.0;
+            m_durationSeconds = 0.0;
+            track.IsPlaying(true);
+
+            RaisePropertyChanged(L"CurrentTrack");
+            RaisePropertyChanged(L"HasTrack");
+            RaisePropertyChanged(L"Title");
+            RaisePropertyChanged(L"Artist");
+            RaisePropertyChanged(L"Album");
+            RaisePropertyChanged(L"IsFavorite");
+            RaisePropertyChanged(L"PositionSeconds");
+            RaisePropertyChanged(L"PositionText");
+            RaisePropertyChanged(L"DurationSeconds");
+            RaisePropertyChanged(L"DurationText");
+
+            std::wstring path{ track.FilePath().c_str() };
+            const bool remote = path.rfind(L"http://", 0) == 0 || path.rfind(L"https://", 0) == 0;
+
+            // EQ active: decode -> filter -> feed back through a MediaStreamSource
+            // proxy. Opening blocks (network!), so hop off the UI thread first; on
+            // any failure we simply continue with the plain source below.
+            bool eqBound = false;
+            if (m_eqEnabled)
+            {
+                auto eq = std::make_shared<wm::app::EqualizedSource>(m_equalizer, std::move(path));
+                co_await winrt::resume_background();
+                bool opened = false;
+                try
+                {
+                    opened = eq->Open();
+                }
+                catch (...)
+                {
+                    opened = false;
+                }
+                co_await ResumeToUi{ m_dispatcher };
+                if (opened)
+                {
+                    try
+                    {
+                        m_eqSource = std::move(eq);
+                        m_player.Source(MediaSource::CreateFromMediaStreamSource(m_eqSource->Source()));
+                        m_player.Play();
+                        eqBound = true;
+                        wm::app::Diag("play eq source set");
+                    }
+                    catch (...)
+                    {
+                        eqBound = false;
+                        m_eqSource.reset();
+                    }
+                }
+            }
+
+            if (!eqBound)
+            {
+                m_eqSource.reset();
+                try
+                {
+                    if (remote)
+                    {
+                        // Streamed straight from an online source (see OnlineProviderService).
+                        m_player.Source(MediaSource::CreateFromUri(winrt::Windows::Foundation::Uri{ track.FilePath() }));
+                        m_player.Play();
+                    }
+                    else
+                    {
+                        auto file = co_await StorageFile::GetFileFromPathAsync(track.FilePath());
+                        co_await ResumeToUi{ m_dispatcher };
+                        m_player.Source(MediaSource::CreateFromStorageFile(file));
+                        m_player.Play();
+                    }
+                    wm::app::Diag("play source set");
+                }
+                catch (...)
+                {
+                    // Unreadable / missing file: fall through so the next track can play.
+                }
+            }
+
+            // Lyrics / play-count / pending-resume all touch UI-bound state.
+            co_await ResumeToUi{ m_dispatcher };
+            ApplyPendingResume();
+
+            if (!remote)
+            {
+                co_await LoadLyricAsync(track.Id());
+                co_await ResumeToUi{ m_dispatcher };
+                wm::app::Library().MarkPlayed(track.Id());
+            }
+            else
+            {
+                // QQ online previews have a resolvable mid baked into their id; pull
+                // the LRC from QQ when logged in (or through the public endpoint) so
+                // the now-playing lyrics highlight works without a local file.
+                std::string const mid = QqMidFromTrack(track.Id());
+                if (!mid.empty())
+                {
+                    LoadOnlineLyric(mid);
+                }
+            }
+            wm::app::Diag("play done");
+        }
+        catch (...)
+        {
+            // Playback failures must never take the app down.
+            wm::app::Diag("play exception");
         }
     }
 
@@ -530,6 +628,7 @@ namespace winrt::w_music::implementation
     IAsyncAction PlayerViewModel::LoadLyricAsync(hstring trackId)
     {
         const hstring text = co_await wm::app::Library().LoadLyricTextAsync(trackId);
+        co_await ResumeToUi{ m_dispatcher };
         ApplyLyricText(wm::app::Utf8(std::wstring_view{ text.c_str(), text.size() }));
     }
 
@@ -551,12 +650,16 @@ namespace winrt::w_music::implementation
         return mid;
     }
 
-    void PlayerViewModel::LoadOnlineLyric(std::string const& mid)
+    winrt::fire_and_forget PlayerViewModel::LoadOnlineLyric(std::string const& mid)
     {
         if (mid.empty())
         {
-            return;
+            co_return;
         }
+        auto lifetime = get_strong();
+
+        co_await winrt::resume_background();
+        std::string lyric;
         try
         {
             wm::core::QqSource source{ wm::app::Online().Transport() };
@@ -567,16 +670,20 @@ namespace winrt::w_music::implementation
                     wm::app::Utf8(std::wstring_view{ settings.QqSessionCookie().c_str(), settings.QqSessionCookie().size() }),
                     wm::app::Utf8(std::wstring_view{ settings.QqUin().c_str(), settings.QqUin().size() }));
             }
-            std::string const lyric = source.Lyric(mid);
-            if (!lyric.empty())
-            {
-                ApplyLyricText(lyric);
-            }
+            lyric = source.Lyric(mid);
         }
         catch (...)
         {
             // Lyrics are decorative: never let a fetch failure break playback.
+            co_return;
         }
+
+        if (lyric.empty())
+        {
+            co_return;
+        }
+        co_await ResumeToUi{ m_dispatcher };
+        ApplyLyricText(lyric);
     }
 
     void PlayerViewModel::ApplyLyricText(std::string const& text)
@@ -707,6 +814,8 @@ namespace winrt::w_music::implementation
 
     void PlayerViewModel::OnTick()
     {
+        try
+        {
         PushSpectrumToUi();
 
         if (m_player == nullptr || m_player.PlaybackSession() == nullptr)
@@ -753,5 +862,10 @@ namespace winrt::w_music::implementation
             m_lyrics.GetAt(static_cast<std::uint32_t>(next)).IsActive(true);
         }
         RaisePropertyChanged(L"ActiveLyricIndex");
+        }
+        catch (...)
+        {
+            wm::app::Diag("OnTick exception");
+        }
     }
 }

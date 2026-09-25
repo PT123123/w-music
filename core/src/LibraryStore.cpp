@@ -134,6 +134,14 @@ std::string LibraryStore::NewId() {
     return std::string(buf);
 }
 
+void LibraryStore::RebuildTrackIndex() {
+    m_trackIndex.clear();
+    m_trackIndex.reserve(data_.tracks.size());
+    for (std::size_t i = 0; i < data_.tracks.size(); ++i) {
+        m_trackIndex[data_.tracks[i].id] = i;
+    }
+}
+
 bool LibraryStore::Load(const std::string& path, std::string* error) {
     const std::string text = ReadFile(path);
     if (text.empty()) {
@@ -167,6 +175,7 @@ bool LibraryStore::Load(const std::string& path, std::string* error) {
     }
 
     data_ = std::move(loaded);
+    RebuildTrackIndex();
     return true;
 }
 
@@ -196,12 +205,28 @@ bool LibraryStore::Save(const std::string& path, std::string* error) const {
 }
 
 TrackRecord* LibraryStore::FindTrack(const std::string& id) {
+    const auto indexed = m_trackIndex.find(id);
+    if (indexed != m_trackIndex.end() && indexed->second < data_.tracks.size() &&
+        data_.tracks[indexed->second].id == id) {
+        return &data_.tracks[indexed->second];
+    }
+
     const auto it = std::find_if(data_.tracks.begin(), data_.tracks.end(),
                                  [&](const TrackRecord& t) { return t.id == id; });
-    return it == data_.tracks.end() ? nullptr : &(*it);
+    if (it == data_.tracks.end()) {
+        return nullptr;
+    }
+    m_trackIndex[id] = static_cast<std::size_t>(std::distance(data_.tracks.begin(), it));
+    return &(*it);
 }
 
 const TrackRecord* LibraryStore::FindTrack(const std::string& id) const {
+    const auto indexed = m_trackIndex.find(id);
+    if (indexed != m_trackIndex.end() && indexed->second < data_.tracks.size() &&
+        data_.tracks[indexed->second].id == id) {
+        return &data_.tracks[indexed->second];
+    }
+
     const auto it = std::find_if(data_.tracks.begin(), data_.tracks.end(),
                                  [&](const TrackRecord& t) { return t.id == id; });
     return it == data_.tracks.end() ? nullptr : &(*it);
@@ -228,12 +253,17 @@ void LibraryStore::UpsertTrack(const TrackRecord& track) {
         return;
     }
     data_.tracks.push_back(track);
+    m_trackIndex[track.id] = data_.tracks.size() - 1;
 }
 
 void LibraryStore::RemoveTrack(const std::string& id) {
-    data_.tracks.erase(std::remove_if(data_.tracks.begin(), data_.tracks.end(),
-                                      [&](const TrackRecord& t) { return t.id == id; }),
-                       data_.tracks.end());
+    TrackRecord* existing = FindTrack(id);
+    if (existing == nullptr) {
+        return;
+    }
+    const auto position = m_trackIndex.at(id);
+    data_.tracks.erase(data_.tracks.begin() + static_cast<std::ptrdiff_t>(position));
+    RebuildTrackIndex();
     for (auto& p : data_.playlists) {
         p.trackIds.erase(std::remove(p.trackIds.begin(), p.trackIds.end(), id), p.trackIds.end());
     }

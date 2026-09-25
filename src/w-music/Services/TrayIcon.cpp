@@ -14,8 +14,6 @@ namespace
         CmdShowMain = 1,
         CmdExitApp = 2,
     };
-
-    constexpr wchar_t kWindowClass[] = L"w-music-tray-window";
 } // namespace
 
 namespace wm::app
@@ -25,21 +23,24 @@ namespace wm::app
         Destroy();
     }
 
-    bool TrayIcon::Initialize(HWND mainWindow, std::wstring_view iconPath)
+    bool TrayIcon::Initialize(HWND mainWindow, std::wstring_view iconPath,
+                              std::function<void()> onShow, std::function<void()> onExit)
     {
         if (m_messageWindow != nullptr)
         {
             return true; // already initialized
         }
         m_mainWindow = mainWindow;
+        m_onShow = std::move(onShow);
+        m_onExit = std::move(onExit);
 
         WNDCLASSW wc{};
         wc.lpfnWndProc = &TrayIcon::WndProc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = kWindowClass;
+        wc.lpszClassName = kTrayWindowClassName;
         RegisterClassW(&wc);
 
-        m_messageWindow = CreateWindowExW(0, kWindowClass, L"w-music-tray", 0,
+        m_messageWindow = CreateWindowExW(0, kTrayWindowClassName, L"w-music-tray", 0,
                                           0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, this);
         if (m_messageWindow == nullptr)
         {
@@ -117,6 +118,15 @@ namespace wm::app
                 self->OnTrayMessage(static_cast<UINT>(lParam), wParam);
                 return 0;
             }
+            if (message == WM_TRAY_SHOW_MAIN)
+            {
+                // 第二个实例请求显示窗口。
+                if (self->m_onShow)
+                {
+                    self->m_onShow();
+                }
+                return 0;
+            }
             if (message == WM_DESTROY)
             {
                 self->m_messageWindow = nullptr;
@@ -132,7 +142,11 @@ namespace wm::app
         {
         case WM_LBUTTONUP:
         case WM_LBUTTONDBLCLK:
-            if (m_mainWindow != nullptr)
+            if (m_onShow)
+            {
+                m_onShow();
+            }
+            else if (m_mainWindow != nullptr)
             {
                 ShowWindow(m_mainWindow, SW_RESTORE);
                 SetForegroundWindow(m_mainWindow);
@@ -167,14 +181,20 @@ namespace wm::app
         // posting a null message lets the shell close the menu cleanly.
         PostMessageW(m_messageWindow, WM_NULL, 0, 0);
 
-        if (command == CmdShowMain && m_mainWindow != nullptr)
+        if (command == CmdShowMain)
         {
-            ShowWindow(m_mainWindow, SW_RESTORE);
-            SetForegroundWindow(m_mainWindow);
+            if (m_onShow)
+            {
+                m_onShow();
+            }
         }
         else if (command == CmdExitApp)
         {
-            PostMessageW(m_mainWindow, WM_CLOSE, 0, 0);
+            // 退出必须走回调：直接 Post WM_CLOSE 现在会变成"隐藏到托盘"。
+            if (m_onExit)
+            {
+                m_onExit();
+            }
         }
     }
 } // namespace wm::app

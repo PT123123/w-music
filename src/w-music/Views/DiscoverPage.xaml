@@ -233,7 +233,7 @@
                 </StackPanel>
 
                 <TextBlock FontSize="12" Opacity="0.55" TextWrapping="Wrap"
-                           Text="想找新歌？左侧「在线发现」标签页可以从在线源搜索并直接下载到本地曲库。" />
+                           Text="想找新歌？左侧「个性推荐」会按音频听感推荐本地曲库里相近的歌，「在线发现」标签页可以从在线源搜索并直接下载到本地曲库。" />
             </StackPanel>
         </ScrollViewer>
     </Grid>

@@ -1,0 +1,9 @@
+namespace w_music
+{
+    runtimeclass RecommendPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        RecommendPage();
+
+        RecommendViewModel ViewModel { get; };
+    }
+}

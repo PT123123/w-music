@@ -3,10 +3,20 @@
 #include "TrackItem.h"
 #include "TrackItem.g.cpp"
 
+#include "Services/AppPaths.h"
+
 namespace winrt::w_music::implementation
 {
     void TrackItem::RaisePropertyChanged(std::wstring_view const& name)
     {
+        if (!wm::app::UiThread())
+        {
+            wm::app::Diag("Track Raise off-ui: " + wm::app::Utf8(name));
+            wm::app::PostToUi([strong = get_strong(), text = std::wstring{ name }] {
+                strong->RaisePropertyChanged(text);
+            });
+            return;
+        }
         m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
     }
 

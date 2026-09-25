@@ -4,13 +4,24 @@
 
 #include <knownfolders.h>
 #include <shlobj_core.h>
+#include <combaseapi.h>
 
 #include <winrt/Windows.Storage.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
+
+#include <atomic>
+#include <cstdio>
+#include <fstream>
+#include <mutex>
 
 namespace wm::app
 {
     namespace
     {
+        std::atomic<DWORD> g_uiThreadId{ 0 };
+        winrt::Microsoft::UI::Dispatching::DispatcherQueue g_dispatcher{ nullptr };
+        std::mutex g_diagMutex;
+
         std::filesystem::path LocalState()
         {
             try
@@ -61,6 +72,85 @@ namespace wm::app
     {
         std::error_code ec;
         std::filesystem::create_directories(DataDirectory(), ec);
+    }
+
+    void SetUiThread()
+    {
+        g_uiThreadId.store(GetCurrentThreadId(), std::memory_order_release);
+        g_dispatcher = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+
+        // The generated wWinMain calls winrt::init_apartment() which defaults
+        // to multi-threaded; record it so diag.log can confirm why
+        // apartment_context hops never returned to this thread.
+        APTTYPE type{};
+        APTTYPEQUALIFIER qualifier{};
+        if (SUCCEEDED(CoGetApartmentType(&type, &qualifier)))
+        {
+            char buf[64]{};
+            snprintf(buf, sizeof(buf), "ui apartment type=%d qualifier=%d", static_cast<int>(type),
+                     static_cast<int>(qualifier));
+            Diag(buf);
+        }
+    }
+
+    bool UiThread()
+    {
+        return g_uiThreadId.load(std::memory_order_acquire) == GetCurrentThreadId();
+    }
+
+    void PostToUi(std::function<void()> fn)
+    {
+        if (!fn)
+        {
+            return;
+        }
+        const auto dispatcher = g_dispatcher;
+        if (UiThread() || dispatcher == nullptr)
+        {
+            fn();
+            return;
+        }
+        if (!dispatcher.TryEnqueue([fn = std::move(fn)] { fn(); }))
+        {
+            Diag("PostToUi: dispatcher rejected the work item");
+        }
+    }
+
+    bool UiAwaiter::await_ready() const noexcept
+    {
+        return UiThread();
+    }
+
+    void UiAwaiter::await_suspend(std::coroutine_handle<> handle) const
+    {
+        const auto dispatcher = g_dispatcher;
+        if (!dispatcher || !dispatcher.TryEnqueue([handle] { handle.resume(); }))
+        {
+            // Dispatcher unavailable or shutting down: never strand the
+            // coroutine - resume inline and let the self-healing property
+            // raises deal with the wrong thread.
+            Diag("ResumeOnUi: dispatcher rejected, resuming inline");
+            handle.resume();
+        }
+    }
+
+    UiAwaiter ResumeOnUi() noexcept
+    {
+        return {};
+    }
+
+    void Diag(std::string_view msg)
+    {
+        std::lock_guard<std::mutex> lock(g_diagMutex);
+        std::ofstream out(DataDirectory() / L"diag.log", std::ios::app);
+        if (!out)
+        {
+            return;
+        }
+        out << GetTickCount64()
+            << " tid=" << GetCurrentThreadId()
+            << " ui=" << (UiThread() ? 1 : 0)
+            << ' ' << msg << '\n';
     }
 
     std::wstring Utf16(std::string_view utf8)

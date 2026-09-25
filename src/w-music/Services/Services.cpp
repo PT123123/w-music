@@ -2,10 +2,12 @@
 
 #include "Services/LibraryService.h"
 #include "Services/OnlineProviderService.h"
+#include "Services/RecommendService.h"
 #include "Services/Services.h"
 
 #include "ViewModels/LibraryViewModel.h"
 #include "ViewModels/PlayerViewModel.h"
+#include "ViewModels/RecommendViewModel.h"
 
 namespace wm::app
 {
@@ -21,6 +23,12 @@ namespace wm::app
         return instance;
     }
 
+    RecommendService& Recommend()
+    {
+        static RecommendService instance;
+        return instance;
+    }
+
     winrt::w_music::PlayerViewModel Player()
     {
         static auto instance = winrt::make<winrt::w_music::implementation::PlayerViewModel>();
@@ -30,6 +38,12 @@ namespace wm::app
     winrt::w_music::LibraryViewModel LibraryVm()
     {
         static auto instance = winrt::make<winrt::w_music::implementation::LibraryViewModel>();
+        return instance;
+    }
+
+    winrt::w_music::RecommendViewModel RecommendVm()
+    {
+        static auto instance = winrt::make<winrt::w_music::implementation::RecommendViewModel>();
         return instance;
     }
 }

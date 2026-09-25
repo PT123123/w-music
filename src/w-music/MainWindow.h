@@ -2,6 +2,7 @@
 
 #include "MainWindow.g.h"
 
+#include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 
@@ -29,6 +30,12 @@ namespace winrt::w_music::implementation
     private:
         void OnLoaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnWindowClosed(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::WindowEventArgs const& args);
+        /// 点 X / Alt+F4：取消关闭、窗口收进托盘（托盘里"退出"才真正退出）。
+        void OnAppWindowClosing(winrt::Microsoft::UI::Windowing::AppWindow const& sender,
+                                winrt::Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args);
+        void HideToTray();
+        void ShowFromTray();
+        void ExitApp();
         void OnNavigationSelectionChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender,
                                           winrt::Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const& args);
         void OnPlayPauseClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -76,6 +83,10 @@ namespace winrt::w_music::implementation
         wm::app::SpectrumView m_spectrumView;
         wm::app::TrayIcon m_trayIcon;
         bool m_updatingSlider = false;
+        /// 托盘初始化成功后才把关窗动作改成"收进托盘"（否则没法再回来）。
+        bool m_trayReady = false;
+        /// 托盘菜单"退出"置位，放行真正的关闭。
+        bool m_exitRequested = false;
         std::wstring m_themeId{ L"qq" };
 
         std::vector<winrt::Microsoft::UI::Xaml::Controls::Slider> m_eqSliders;

@@ -4,6 +4,8 @@
 #include "App.g.cpp"
 
 #include "MainWindow.h"
+#include "Services/AppPaths.h"
+#include "Services/SingleInstance.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -41,6 +43,13 @@ namespace winrt::w_music::implementation
 
     void App::OnLaunched(LaunchActivatedEventArgs const&)
     {
+        // 单实例：已有实例在跑就把它的窗口唤到前台，然后本进程直接退出。
+        if (!wm::app::AcquireSingleInstance())
+        {
+            wm::app::SignalExistingInstance();
+            ExitProcess(0);
+        }
+
         m_window = make<MainWindow>();
         m_window.Activate();
     }

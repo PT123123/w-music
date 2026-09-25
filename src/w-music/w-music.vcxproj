@@ -94,18 +94,23 @@
     <ClInclude Include="Services\OnlineProviderService.h" />
     <ClInclude Include="Services\BuiltinProviders.h" />
     <ClInclude Include="Services\DiscoverSettings.h" />
+    <ClInclude Include="Services\RecommendService.h" />
     <ClInclude Include="Services\Services.h" />
     <ClInclude Include="Models\TrackItem.h" />
     <ClInclude Include="Models\PlaylistItem.h" />
     <ClInclude Include="Models\LyricLineItem.h" />
     <ClInclude Include="Models\OnlineTrackItem.h" />
     <ClInclude Include="Models\QualityChipItem.h" />
+    <ClInclude Include="Models\RecommendItem.h" />
+    <ClInclude Include="Models\CategoryItem.h" />
     <ClInclude Include="ViewModels\PlayerViewModel.h" />
     <ClInclude Include="ViewModels\LibraryViewModel.h" />
+    <ClInclude Include="ViewModels\RecommendViewModel.h" />
     <ClInclude Include="Views\DiscoverPage.h" />
     <ClInclude Include="Views\OnlinePage.h" />
     <ClInclude Include="Views\LibraryPage.h" />
     <ClInclude Include="Views\NowPlayingPage.h" />
+    <ClInclude Include="Views\RecommendPage.h" />
   </ItemGroup>
 
   <!-- ================= sources ================= -->
@@ -123,18 +128,23 @@
     <ClCompile Include="Services\OnlineProviderService.cpp" />
     <ClCompile Include="Services\BuiltinProviders.cpp" />
     <ClCompile Include="Services\DiscoverSettings.cpp" />
+    <ClCompile Include="Services\RecommendService.cpp" />
     <ClCompile Include="Services\Services.cpp" />
     <ClCompile Include="Models\TrackItem.cpp" />
     <ClCompile Include="Models\PlaylistItem.cpp" />
     <ClCompile Include="Models\LyricLineItem.cpp" />
     <ClCompile Include="Models\OnlineTrackItem.cpp" />
     <ClCompile Include="Models\QualityChipItem.cpp" />
+    <ClCompile Include="Models\RecommendItem.cpp" />
+    <ClCompile Include="Models\CategoryItem.cpp" />
     <ClCompile Include="ViewModels\PlayerViewModel.cpp" />
     <ClCompile Include="ViewModels\LibraryViewModel.cpp" />
+    <ClCompile Include="ViewModels\RecommendViewModel.cpp" />
     <ClCompile Include="Views\DiscoverPage.cpp" />
     <ClCompile Include="Views\OnlinePage.cpp" />
     <ClCompile Include="Views\LibraryPage.cpp" />
     <ClCompile Include="Views\NowPlayingPage.cpp" />
+    <ClCompile Include="Views\RecommendPage.cpp" />
     <!-- platform-independent core layer (no pch.h -> no precompiled header) -->
     <ClCompile Include="..\..\core\src\Fft.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -181,6 +191,7 @@
     <Midl Include="Views\OnlinePage.idl" />
     <Midl Include="Views\LibraryPage.idl" />
     <Midl Include="Views\NowPlayingPage.idl" />
+    <Midl Include="Views\RecommendPage.idl" />
   </ItemGroup>
 
   <!-- ================= XAML ================= -->
@@ -206,6 +217,10 @@
       <DeploymentContent>true</DeploymentContent>
     </Page>
     <Page Include="Views\NowPlayingPage.xaml">
+      <SubType>Designer</SubType>
+      <DeploymentContent>true</DeploymentContent>
+    </Page>
+    <Page Include="Views\RecommendPage.xaml">
       <SubType>Designer</SubType>
       <DeploymentContent>true</DeploymentContent>
     </Page>

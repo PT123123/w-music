@@ -3,6 +3,7 @@
 #include "Views/LibraryPage.h"
 #include "Views/LibraryPage.g.cpp"
 
+#include "Services/AppPaths.h"
 #include "Services/LibraryService.h"
 #include "Services/Services.h"
 #include "ViewModels/LibraryViewModel.h"
@@ -63,22 +64,30 @@ namespace winrt::w_music::implementation
 
     void LibraryPage::OnTrackItemClick(Windows::Foundation::IInspectable const&, ItemClickEventArgs const& args)
     {
-        auto track = args.ClickedItem().try_as<winrt::w_music::TrackItem>();
-        if (track == nullptr)
+        wm::app::Diag("click track");
+        try
         {
-            return;
+            auto track = args.ClickedItem().try_as<winrt::w_music::TrackItem>();
+            if (track == nullptr)
+            {
+                return;
+            }
+
+            auto player = wm::app::Player();
+            std::uint32_t index = 0;
+
+            if (auto vector = TrackList().ItemsSource().try_as<IVector<winrt::w_music::TrackItem>>())
+            {
+                vector.IndexOf(track, index);
+                player.SetQueue(vector, static_cast<int32_t>(index));
+            }
+
+            player.PlayTrack(track);
         }
-
-        auto player = wm::app::Player();
-        std::uint32_t index = 0;
-
-        if (auto vector = TrackList().ItemsSource().try_as<IVector<winrt::w_music::TrackItem>>())
+        catch (...)
         {
-            vector.IndexOf(track, index);
-            player.SetQueue(vector, static_cast<int32_t>(index));
+            wm::app::Diag("click track exception");
         }
-
-        player.PlayTrack(track);
     }
 
     void LibraryPage::OnPlayPlaylistClicked(Windows::Foundation::IInspectable const&, RoutedEventArgs const&)

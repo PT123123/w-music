@@ -124,6 +124,18 @@ namespace wm::app
                 m_eqGains[i++] = std::clamp(entry.asNumber(), -12.0, 12.0);
             }
         }
+        if (auto const* dir = root->Find("recommendServerDir"); dir != nullptr && dir->isString())
+        {
+            m_recommendServerDir = Utf16(dir->asString());
+        }
+        if (auto const* port = root->Find("recommendServerPort"); port != nullptr && port->isNumber())
+        {
+            int const value = static_cast<int>(port->asInt());
+            if (value >= 1024 && value <= 65535)
+            {
+                m_recommendServerPort = static_cast<unsigned short>(value);
+            }
+        }
     }
 
     void DiscoverSettings::Save() const
@@ -151,6 +163,9 @@ namespace wm::app
             gains.push_back(wm::core::json::Value{ gain });
         }
         root["eqGains"] = wm::core::json::Value{ std::move(gains) };
+
+        root["recommendServerDir"] = wm::core::json::Value{ Utf8(m_recommendServerDir) };
+        root["recommendServerPort"] = wm::core::json::Value{ static_cast<std::int64_t>(m_recommendServerPort) };
 
         WriteFile(SettingsFilePath(), wm::core::json::Serialize(wm::core::json::Value{ std::move(root) }, true));
     }
@@ -281,6 +296,26 @@ namespace wm::app
         m_eqPreset = preset;
         m_eqPreampDb = preampDb;
         m_eqGains = clamped;
+        Save();
+    }
+
+    void DiscoverSettings::RecommendServerDir(std::wstring const& value)
+    {
+        if (m_recommendServerDir == value)
+        {
+            return;
+        }
+        m_recommendServerDir = value;
+        Save();
+    }
+
+    void DiscoverSettings::RecommendServerPort(unsigned short value)
+    {
+        if (m_recommendServerPort == value)
+        {
+            return;
+        }
+        m_recommendServerPort = value;
         Save();
     }
 

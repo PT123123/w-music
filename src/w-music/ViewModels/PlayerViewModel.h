@@ -105,13 +105,15 @@ namespace winrt::w_music::implementation
         winrt::Windows::Foundation::IAsyncAction LoadLyricAsync(hstring trackId);
         /// Parses |text| (LRC) into a target-relative track id, i.e. the mid of
         /// an ongoing QQ online track.
-        void LoadOnlineLyric(std::string const& mid);
+        /// Fetches the LRC on a worker thread, then applies it on the UI thread.
+        winrt::fire_and_forget LoadOnlineLyric(std::string const& mid);
         /// Populates m_lyrics / m_lyric from raw LRC text and raises the UI props.
         void ApplyLyricText(std::string const& text);
         /// Strips a "online:qq:{mid}:preview" TrackItem id down to the mid.
         static std::string QqMidFromTrack(hstring const& trackId);
         void OnTick();
-        void OnMediaEnded(winrt::Windows::Media::Playback::MediaPlayer const& sender, winrt::Windows::Foundation::IInspectable const& args);
+        void HandleMediaEnded();
+        void SyncPlayingState();
         void PushSpectrumToUi();
         void SyncFavoriteState();
         /// Restores position / pause state after SetEqualizerEnabled re-bound the source.

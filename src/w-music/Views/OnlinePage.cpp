@@ -186,7 +186,6 @@ namespace winrt::w_music::implementation
     {
         InitializeComponent();
 
-        m_ui = winrt::apartment_context{};
         m_dispatcher = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
         m_currentSource = wm::app::Settings().DiscoverSource();
 
@@ -296,6 +295,7 @@ namespace winrt::w_music::implementation
         RescanButton().IsEnabled(false);
         OnlineStatus().Text(L"正在重新扫描本地音乐文件夹…");
         co_await wm::app::Library().RescanAsync();
+        co_await wm::app::ResumeOnUi();
         RescanButton().IsEnabled(true);
         RefreshLibraryStats();
         OnlineStatus().Text(L"本地曲库已更新");
@@ -455,7 +455,7 @@ namespace winrt::w_music::implementation
                 rows.push_back(ToQqItem(song));
             }
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
 
         if (token != m_qqSearchToken)
         {
@@ -505,7 +505,7 @@ namespace winrt::w_music::implementation
             wm::core::QqSource source = QqSourceWithSession();
             url = source.DirectUrl(Narrow(item.Id()));
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         m_qqResolving = false;
 
         if (url.empty())
@@ -579,7 +579,7 @@ namespace winrt::w_music::implementation
         wm::core::QqLoginContext context;
         co_await winrt::resume_background();
         context = flow.FetchQr();
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         m_qqResolving = false;
 
         if (!context.ok)
@@ -662,7 +662,7 @@ namespace winrt::w_music::implementation
             co_await winrt::resume_after(std::chrono::seconds{ 2 });
             co_await winrt::resume_background();
             result = flow.CheckStatus(context);
-            co_await m_ui;
+            co_await wm::app::ResumeOnUi();
 
             switch (result.status)
             {
@@ -731,7 +731,7 @@ namespace winrt::w_music::implementation
             wm::core::QqSource source = QqSourceWithSession();
             url = source.DirectUrl(Narrow(item.Id()));
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         if (url.empty())
         {
             OnlineStatus().Text(hstring{ L"《" + std::wstring{ item.Title().c_str() } +
@@ -761,7 +761,7 @@ namespace winrt::w_music::implementation
                     }
                 });
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
 
         if (!ok)
         {
@@ -782,6 +782,7 @@ namespace winrt::w_music::implementation
         {
             imported = nullptr;
         }
+        co_await wm::app::ResumeOnUi();
 
         m_qqDownloading.erase(mid);
         if (imported == nullptr)
@@ -880,7 +881,7 @@ namespace winrt::w_music::implementation
                 rows.push_back(std::move(item));
             }
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
 
         if (token != m_net24SearchToken)
         {
@@ -932,7 +933,7 @@ namespace winrt::w_music::implementation
             // Preview streams the lightest tier the row can serve.
             result = m_net24->Preview(song);
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         m_net24Previewing = false;
 
         if (!result.ok)
@@ -1017,7 +1018,7 @@ namespace winrt::w_music::implementation
             // below), so repeat asks are free.
             result = m_net24->Resolve(song, quality);
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         m_net24Resolving = false;
         chip.Content(originalContent);
         chip.IsEnabled(true);
@@ -1119,7 +1120,7 @@ namespace winrt::w_music::implementation
                     }
                 });
         }
-        co_await m_ui;
+        co_await wm::app::ResumeOnUi();
         m_net24Downloading.erase(key);
 
         if (!ok)
@@ -1138,6 +1139,7 @@ namespace winrt::w_music::implementation
         {
             imported = nullptr;
         }
+        co_await wm::app::ResumeOnUi();
         if (imported == nullptr)
         {
             OnlineStatus().Text(hstring{ L"下载完成但导入失败：" + std::wstring{ row.Title().c_str() } });
@@ -1343,6 +1345,8 @@ namespace winrt::w_music::implementation
                                          std::to_wstring(items.Size()) + L"）：" +
                                          std::wstring{ item.Title().c_str() } + L" …" });
             auto track = co_await wm::app::Online().DownloadAsync(item);
+            // DownloadAsync failure paths finish on a background thread.
+            co_await wm::app::ResumeOnUi();
             if (track != nullptr)
             {
                 ++ok;

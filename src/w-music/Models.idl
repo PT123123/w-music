@@ -91,4 +91,58 @@ namespace w_music
         Microsoft.UI.Xaml.Media.Brush Foreground { get; };
         Double FontSize { get; };
     }
+
+    /// One row produced by the local MIR recommendation engine (the separate
+    /// music-recommend project: https://github.com/PT123123/music-recommend).
+    runtimeclass RecommendItem
+    {
+        RecommendItem();
+
+        /// Engine-side content-hash track id (used for feed feedback).
+        String TrackId { get; set; };
+        String Title { get; set; };
+        String Artist { get; set; };
+        /// Collapsed when the file carries no artist tag.
+        Microsoft.UI.Xaml.Visibility HasArtist { get; };
+        String Album { get; set; };
+        String FilePath { get; set; };
+        /// Recommendation score normalized to 0..1 by the engine.
+        Double Score { get; set; };
+        /// "87" style percentage label rendered next to the row; "探索" when
+        /// the engine returned no score (cold-start diversity pick).
+        String ScoreText { get; set; };
+        /// Small caption under ScoreText: "匹配" / "冷启动".
+        String ScoreLabel { get; set; };
+        String Reasons { get; set; };
+        /// Collapsed when the engine had no reasons for this row.
+        Microsoft.UI.Xaml.Visibility ReasonsVisibility { get; };
+        /// File-tag summary ("摇滚 · 国语"), the engine's `display.genre` /
+        /// `display.language`. Only ever filled when `meta_source` says the
+        /// file itself carries those tags -- never from audio analysis.
+        String TagText { get; set; };
+        /// Collapsed when the row has no file tags (the common case).
+        Microsoft.UI.Xaml.Visibility HasTagText { get; };
+    }
+
+    /// One category of the recommendation engine: a preset from
+    /// configs/categories.yaml, or a cluster the engine discovered in the
+    /// current library (ids `auto-*`).
+    runtimeclass CategoryItem
+    {
+        CategoryItem();
+
+        String Id { get; set; };
+        String Label { get; set; };
+        /// "preset" or "discovered"; decides which chip row the page shows.
+        String Source { get; set; };
+        Boolean IsDiscovered { get; };
+        /// Engine's own honesty note: for presets a caveat about the name
+        /// (性别 / 曲风 无法从音频识别), for `auto-*` the cluster provenance.
+        String Note { get; set; };
+        Boolean HasNote { get; };
+        /// Tracks in the library for this category (0 when not reported).
+        Int32 Support { get; set; };
+        /// "38 首" caption shown on auto chips; "" for presets.
+        String SupportText { get; set; };
+    }
 }

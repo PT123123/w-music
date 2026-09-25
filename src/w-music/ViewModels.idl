@@ -81,4 +81,48 @@ namespace w_music
         void PlayPlaylist(String playlistId);
         void PlayAll();
     }
+
+    /// The 个性推荐 page: engine status, category chips and the feed /
+    /// category / similar lists with their feedback loop. Backed by the local
+    /// MIR engine (music-recommend, https://github.com/PT123123/music-recommend).
+    runtimeclass RecommendViewModel : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        RecommendViewModel();
+
+        /// First entry is the pseudo category "为你推荐" (back to the feed).
+        Windows.Foundation.Collections.IObservableVector<CategoryItem> Categories { get; };
+        Windows.Foundation.Collections.IObservableVector<RecommendItem> Items { get; };
+
+        String ListHeader { get; };
+        String StatusText { get; };
+        String FeedStateText { get; };
+        /// What the engine's unsupervised pass says about the current library
+        /// (k, silhouette, or why it refused to cluster) -- the caption of the
+        /// auto-discovered chip row.
+        String DiscoveryText { get; };
+        /// Honest caveats about the rows now on screen (support size,
+        /// estimated filters, words the engine declined to answer).
+        String CategoryNote { get; };
+        Microsoft.UI.Xaml.Visibility CategoryNoteVisibility { get; };
+        /// Id of the active chip; "" = feed, "__similar__" = none,
+        /// "__text__" = the free-text query box.
+        String SelectedCategoryId { get; };
+        Boolean IsBusy { get; };
+        Boolean HasItems { get; };
+        Microsoft.UI.Xaml.Visibility ItemsVisibility { get; };
+        Microsoft.UI.Xaml.Visibility EmptyVisibility { get; };
+
+        Windows.Foundation.IAsyncAction InitializeAsync();
+        Windows.Foundation.IAsyncAction RefreshFeedAsync();
+        Windows.Foundation.IAsyncAction ShuffleFeedAsync();
+        Windows.Foundation.IAsyncAction SelectCategoryAsync(CategoryItem category);
+        /// The free Chinese entry: one sentence describing what to listen for.
+        Windows.Foundation.IAsyncAction SearchByTextAsync(String text);
+        Windows.Foundation.IAsyncAction LoadSimilarNowAsync();
+        Windows.Foundation.IAsyncAction AnalyzeLibraryAsync();
+        Windows.Foundation.IAsyncAction ResetTasteAsync();
+        void PlayItem(RecommendItem item);
+        void LikeItem(RecommendItem item);
+        void DislikeItem(RecommendItem item);
+    }
 }
