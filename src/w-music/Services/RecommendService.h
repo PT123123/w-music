@@ -34,10 +34,14 @@
 #include "Models/RecommendItem.h"
 
 #include <wm/core/Json.h>
+#include <wm/core/RecommendCache.h>
 
+#include <atomic>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wm::app
@@ -72,6 +76,45 @@ namespace wm::app
         /// process is left alone; the job object also kills ours if w-music
         /// ever exits without calling this.
         void Shutdown();
+
+        /// Where the engine is, for the UI's waiting hint. Cheap, no I/O.
+        enum class Stage : int
+        {
+            Stopped = 0,   // not running, nobody has asked yet
+            Starting = 1,  // spawned or probing; the cold start is the slow one
+            Ready = 2,     // /v1/health answered
+            Analyzing = 3, // busy extracting features; queries queue behind it
+        };
+        Stage CurrentStage() const noexcept { return static_cast<Stage>(m_stage.load()); }
+        /// Starts the engine without waiting for the page -- the app calls this
+        /// in the background once the user has shown they use 个性推荐.
+        winrt::Windows::Foundation::IAsyncAction PrewarmAsync();
+
+        // ---- disk cache (%LOCALAPPDATA%\w-music\recommend-cache.json) ----
+        // The engine boots in seconds and recomputes its rankings, so the page
+        // paints the last answer immediately and replaces it when the live one
+        // arrives. These reads never touch the network or a thread switch.
+        enum class Answer : int { Feed = 0, Category = 1, Text = 2 };
+
+        /// Cached rows of that answer; empty when there is none, it was computed
+        /// for a different library, or it is older than two weeks.
+        winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::RecommendItem>
+            CachedRows(Answer kind, hstring const& id, int32_t limit) const;
+        /// The honesty note that came with the cached answer (may be empty).
+        hstring CachedNote(Answer kind, hstring const& id, int32_t limit) const;
+        /// "刚刚 / 12 分钟前 / 3 小时前 / 2 天前"; empty when nothing is cached.
+        hstring CachedAgeText(Answer kind, hstring const& id, int32_t limit) const;
+        /// Last category chips (preset + auto), for the instant chip row.
+        winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::CategoryItem> CachedChips() const;
+        /// Last auto-discovery caption, or empty.
+        hstring CachedDiscoveryText() const;
+
+        /// Library size namespaces the cache: an answer computed over another
+        /// library is never painted. Call whenever the library is (re)loaded.
+        void SetLibrarySize(int32_t trackCount);
+        /// Forget every cached answer: after 分析曲库 the old ones describe a
+        /// library the engine no longer has.
+        void InvalidateCache();
 
         // ---- /v1 endpoints ----
         /// GET /v1/categories -> preset + auto-discovered category chips, each
@@ -155,15 +198,17 @@ namespace wm::app
         winrt::Windows::Foundation::IAsyncOperation<hstring>
             RequestJsonAsync(hstring method, std::wstring path, std::string body);
         /// Wraps RequestJsonAsync with the ensure-started handshake the UI
-        /// calls before anything else.
+        /// calls before anything else. A non-empty |cacheKey| stores the raw
+        /// answer in the disk cache (written from this background thread).
         winrt::Windows::Foundation::IAsyncOperation<hstring>
-            CallAfterStartAsync(hstring method, std::wstring path, std::string body);
+            CallAfterStartAsync(hstring method, std::wstring path, std::string body,
+                                std::wstring cacheKey = {});
 
         /// Shared POST /v1/recommend/category call; |body| carries either
-        /// category_id or text.
+        /// category_id or text. |cacheKey| names the disk-cache entry.
         winrt::Windows::Foundation::IAsyncOperation<
             winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::RecommendItem>>
-            RequestCategoryAsync(std::string body);
+            RequestCategoryAsync(std::string body, std::wstring cacheKey);
 
         /// Parses one /v1 recommendation row ({track_id, score, reasons,
         /// file_name, display{title, artist, album, genre, language,
@@ -174,6 +219,25 @@ namespace wm::app
         /// Returns empty when the engine had nothing to qualify.
         static std::wstring CategoryNoteOf(wm::core::json::Value const& answer);
 
+        // Response parsing shared by the live calls and the cache readers, so a
+        // cached answer can never be interpreted differently than a live one.
+        static winrt::Windows::Foundation::Collections::IVector<winrt::w_music::RecommendItem>
+            RowsOf(std::wstring_view jsonText, wchar_t const* listField);
+        static winrt::Windows::Foundation::Collections::IVector<winrt::w_music::CategoryItem>
+            ChipsOf(std::wstring_view jsonText);
+        static hstring DiscoveryNoteOf(std::wstring_view jsonText);
+        static hstring NoteOf(std::wstring_view jsonText);
+
+        std::wstring CachePath() const;
+        /// Cache key of one answer; must match between the write and the read.
+        std::wstring MakeKey(Answer kind, hstring const& id, int32_t limit) const;
+        /// What a cached answer has to agree with to be served at all.
+        std::string Fingerprint() const;
+        void CachePut(std::wstring_view key, std::wstring_view jsonText);
+        /// payload + fetchedAt of a usable cached answer.
+        bool CacheLookup(std::wstring const& key, std::int64_t maxAgeMs,
+                         std::wstring& payloadOut, std::int64_t& fetchedAtOut) const;
+
         std::wstring BaseUri() const;
 
         winrt::Windows::Web::Http::HttpClient m_http{ nullptr };
@@ -183,5 +247,14 @@ namespace wm::app
         bool m_spawnedHere = false;
         hstring m_lastError;
         hstring m_categoryNote;
+        std::atomic_int m_stage{ static_cast<int>(Stage::Stopped) };
+
+        /// Filled in the constructor rather than lazily on a page paint: the
+        /// cache is one small file and the reads must stay disk-free.
+        wm::core::RecommendCache m_cache;
+        mutable std::mutex m_cacheMutex;
+        /// Written on the UI thread when the library loads, read on the request
+        /// thread for every cache touch.
+        std::atomic_int32_t m_librarySize{ -1 };
     };
 } // namespace wm::app

@@ -24,6 +24,38 @@ namespace wm::app
         /// The engine's README recommends --workers 6 for real libraries.
         constexpr int ScanWorkers = 6;
 
+        /// Unix milliseconds -- what the disk cache timestamps its entries with.
+        std::int64_t NowMs()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        }
+
+        /// Cache keys for the two answers that are not per-query lists.
+        constexpr wchar_t const* kChipsKey = L"chips";
+        constexpr wchar_t const* kDiscoveryKey = L"discovery";
+
+        /// "刚刚 / 12 分钟前 / 3 小时前 / 2 天前" -- how stale the painted list is.
+        std::wstring CacheAgeText(std::int64_t fetchedAt, std::int64_t now)
+        {
+            std::int64_t const ageMs = now - fetchedAt;
+            if (ageMs < 60'000)
+            {
+                return L"刚刚";
+            }
+            std::int64_t const minutes = ageMs / 60'000;
+            if (minutes < 60)
+            {
+                return std::to_wstring(minutes) + L" 分钟前";
+            }
+            std::int64_t const hours = minutes / 60;
+            if (hours < 24)
+            {
+                return std::to_wstring(hours) + L" 小时前";
+            }
+            return std::to_wstring(hours / 24) + L" 天前";
+        }
+
         hstring Wide(std::string const& utf8)
         {
             return hstring{ Utf16(utf8) };
@@ -94,6 +126,11 @@ namespace wm::app
         // No explicit timeout: Windows.Web.Http has none and requests live as
         // long as the connection does, which is exactly what the minutes-long
         // /v1/library/scan needs. A dead engine surfaces as a faulted request.
+
+        std::string error;
+        m_cache.Load(Utf8(CachePath()), &error);
+        Diag("rec cache loaded n=" + std::to_string(m_cache.Size()) +
+             (error.empty() ? std::string{} : " err=" + error));
     }
 
     RecommendService::~RecommendService()
@@ -139,6 +176,180 @@ namespace wm::app
     std::wstring RecommendService::BaseUri() const
     {
         return L"http://127.0.0.1:" + std::to_wstring(Port());
+    }
+
+    // -----------------------------------------------------------------------
+    // disk cache
+    // -----------------------------------------------------------------------
+
+    std::wstring RecommendService::CachePath() const
+    {
+        return wm::app::RecommendCacheFilePath().wstring();
+    }
+
+    std::string RecommendService::Fingerprint() const
+    {
+        // The engine's categories and rankings are a function of the analyzed
+        // library, so an answer may only be painted over the library it was
+        // computed for. "lib:-1" (library size never reported) is deliberately
+        // its own namespace: those entries just never get served.
+        return "lib:" + std::to_string(m_librarySize.load());
+    }
+
+    std::wstring RecommendService::MakeKey(Answer kind, hstring const& id, int32_t limit) const
+    {
+        wchar_t const* prefix = kind == Answer::Feed ? L"feed:"
+                              : kind == Answer::Category ? L"cat:"
+                                                         : L"text:";
+        return std::wstring{ prefix } + std::wstring{ id } + L":" + std::to_wstring(limit);
+    }
+
+    void RecommendService::CachePut(std::wstring_view key, std::wstring_view jsonText)
+    {
+        if (key.empty() || jsonText.empty())
+        {
+            return;
+        }
+        std::lock_guard lock{ m_cacheMutex };
+        m_cache.Put(Utf8(key), Fingerprint(), Utf8(jsonText), NowMs());
+        EnsureDataDirectory();
+        std::string error;
+        if (!m_cache.Save(Utf8(CachePath()), &error))
+        {
+            // A cache we cannot write is a page that paints slowly, not a page
+            // that breaks: the live request already returned its answer.
+            Diag(std::string{ "rec cache save failed: " } + error);
+        }
+    }
+
+    bool RecommendService::CacheLookup(std::wstring const& key, std::int64_t maxAgeMs,
+                                       std::wstring& payloadOut, std::int64_t& fetchedAtOut) const
+    {
+        payloadOut.clear();
+        fetchedAtOut = 0;
+        if (key.empty())
+        {
+            return false;
+        }
+        std::lock_guard lock{ m_cacheMutex };
+        auto const* entry = m_cache.Find(Utf8(key), Fingerprint(), NowMs(), maxAgeMs);
+        if (entry == nullptr)
+        {
+            return false;
+        }
+        // Copy under the lock: a background refresh may evict this entry at any
+        // time, and RecommendCache hands out pointers into its own map.
+        payloadOut = Utf16(entry->payload);
+        fetchedAtOut = entry->fetchedAt;
+        return true;
+    }
+
+    void RecommendService::SetLibrarySize(int32_t trackCount)
+    {
+        m_librarySize = trackCount;
+    }
+
+    void RecommendService::InvalidateCache()
+    {
+        std::lock_guard lock{ m_cacheMutex };
+        m_cache.Clear();
+        EnsureDataDirectory();
+        std::string error;
+        if (!m_cache.Save(Utf8(CachePath()), &error))
+        {
+            Diag(std::string{ "rec cache clear failed: " } + error);
+        }
+    }
+
+    namespace
+    {
+        /// The list field of a cached answer: the feed wraps its rows in
+        /// "items", every /v1/recommend/* shape in "recommendations".
+        wchar_t const* ListFieldOf(RecommendService::Answer kind)
+        {
+            return kind == RecommendService::Answer::Feed ? L"items" : L"recommendations";
+        }
+    } // namespace
+
+    IVectorView<w_music::RecommendItem>
+    RecommendService::CachedRows(Answer kind, hstring const& id, int32_t limit) const
+    {
+        std::wstring payload;
+        std::int64_t fetchedAt = 0;
+        if (!CacheLookup(MakeKey(kind, id, limit),
+                         static_cast<std::int64_t>(wm::core::RecommendCache::kMaxUsableMs),
+                         payload, fetchedAt))
+        {
+            return winrt::single_threaded_vector<w_music::RecommendItem>().GetView();
+        }
+        return RowsOf(payload, ListFieldOf(kind)).GetView();
+    }
+
+    hstring RecommendService::CachedNote(Answer kind, hstring const& id, int32_t limit) const
+    {
+        if (kind == Answer::Feed)
+        {
+            return {};
+        }
+        std::wstring payload;
+        std::int64_t fetchedAt = 0;
+        if (!CacheLookup(MakeKey(kind, id, limit),
+                         static_cast<std::int64_t>(wm::core::RecommendCache::kMaxUsableMs),
+                         payload, fetchedAt))
+        {
+            return {};
+        }
+        return NoteOf(payload);
+    }
+
+    hstring RecommendService::CachedAgeText(Answer kind, hstring const& id, int32_t limit) const
+    {
+        std::wstring payload;
+        std::int64_t fetchedAt = 0;
+        if (!CacheLookup(MakeKey(kind, id, limit),
+                         static_cast<std::int64_t>(wm::core::RecommendCache::kMaxUsableMs),
+                         payload, fetchedAt))
+        {
+            return {};
+        }
+        return hstring{ CacheAgeText(fetchedAt, NowMs()) };
+    }
+
+    IVectorView<w_music::CategoryItem> RecommendService::CachedChips() const
+    {
+        std::wstring payload;
+        std::int64_t fetchedAt = 0;
+        if (!CacheLookup(kChipsKey, static_cast<std::int64_t>(wm::core::RecommendCache::kMaxUsableMs),
+                         payload, fetchedAt))
+        {
+            return winrt::single_threaded_vector<w_music::CategoryItem>().GetView();
+        }
+        return ChipsOf(payload).GetView();
+    }
+
+    hstring RecommendService::CachedDiscoveryText() const
+    {
+        std::wstring payload;
+        std::int64_t fetchedAt = 0;
+        if (!CacheLookup(kDiscoveryKey, static_cast<std::int64_t>(wm::core::RecommendCache::kMaxUsableMs),
+                         payload, fetchedAt))
+        {
+            return {};
+        }
+        return DiscoveryNoteOf(payload);
+    }
+
+    IAsyncAction RecommendService::PrewarmAsync()
+    {
+        if (m_ready)
+        {
+            co_return;
+        }
+        // Called from MainWindow right after the window is up: the coroutine
+        // hops to a background thread inside EnsureStartedAsync, so the UI
+        // thread never waits on the 5-8 s engine boot.
+        hstring const error = co_await EnsureStartedAsync();
+        Diag(error.empty() ? "rec prewarm ok" : "rec prewarm failed: " + Utf8(error));
     }
 
     // -----------------------------------------------------------------------
@@ -246,6 +457,23 @@ namespace wm::app
         {
             co_return hstring{};
         }
+        // Whatever path this coroutine takes, the stage has to stay
+        // descriptive: the page words its waiting hint from it, and a hint
+        // stuck on "启动中" after a failed start is worse than no hint. The
+        // success paths overwrite the stage, which stops this guard.
+        struct StageExit
+        {
+            std::atomic_int& stage;
+            ~StageExit()
+            {
+                if (stage.load() == static_cast<int>(RecommendService::Stage::Starting))
+                {
+                    stage.store(static_cast<int>(RecommendService::Stage::Stopped));
+                }
+            }
+        } stageExit{ m_stage };
+
+        m_stage = static_cast<int>(Stage::Starting);
         co_await resume_background();
 
         // Reuse an engine that is already up (previous app run, manual start).
@@ -254,7 +482,9 @@ namespace wm::app
         if (co_await HealthCheckAsync())
         {
             m_ready = true;
+            m_stage = static_cast<int>(Stage::Ready);
             m_lastError = {};
+            wm::app::Diag("rec engine ready (reuse)");
             co_return hstring{};
         }
 
@@ -282,6 +512,7 @@ namespace wm::app
                 }
                 if (!m_lastError.empty())
                 {
+                    wm::app::Diag("rec engine start failed: " + wm::app::Utf8(std::wstring{ m_lastError }));
                     co_return m_lastError;
                 }
                 spawned = true;
@@ -317,18 +548,22 @@ namespace wm::app
             if (co_await HealthCheckAsync())
             {
                 m_ready = true;
+                m_stage = static_cast<int>(Stage::Ready);
                 m_lastError = {};
+                wm::app::Diag("rec engine ready (spawned)");
                 co_return hstring{};
             }
         }
 
         m_lastError = hstring{ L"推荐引擎启动超时（45 秒内未通过健康检查）" };
+        wm::app::Diag("rec engine start timeout");
         co_return m_lastError;
     }
 
     void RecommendService::Shutdown()
     {
         m_ready = false;
+        m_stage = static_cast<int>(Stage::Stopped);
         if (m_process != nullptr)
         {
             if (m_spawnedHere)
@@ -352,6 +587,14 @@ namespace wm::app
     IAsyncOperation<hstring> RecommendService::RequestJsonAsync(hstring method, std::wstring path, std::string body)
     {
         co_await resume_background();
+        // Steady clock: the diag lines are the only consumer and a wall-clock
+        // jump must not turn into a nonsense duration.
+        auto const started = std::chrono::steady_clock::now();
+        auto const elapsedMs = [started]()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - started).count();
+        };
         try
         {
             HttpRequestMessage message{ HttpMethod{ method }, Uri{ hstring{ BaseUri() + path } } };
@@ -392,7 +635,8 @@ namespace wm::app
         co_return hstring{};
     }
 
-    IAsyncOperation<hstring> RecommendService::CallAfterStartAsync(hstring method, std::wstring path, std::string body)
+    IAsyncOperation<hstring> RecommendService::CallAfterStartAsync(hstring method, std::wstring path,
+                                                                   std::string body, std::wstring cacheKey)
     {
         hstring const startError = co_await EnsureStartedAsync();
         if (!startError.empty())
@@ -400,9 +644,13 @@ namespace wm::app
             m_lastError = startError;
             co_return hstring{};
         }
+        // This is the number behind "点击时耗时太长": everything before it is
+        // the engine handshake, everything after is a page paint.
+        auto const started = std::chrono::steady_clock::now();
+        hstring text;
         try
         {
-            co_return co_await RequestJsonAsync(std::move(method), std::move(path), std::move(body));
+            text = co_await RequestJsonAsync(std::move(method), path, std::move(body));
         }
         catch (...)
         {
@@ -413,11 +661,44 @@ namespace wm::app
             m_lastError = hstring{ L"推荐引擎请求异常（引擎可能未启动）" };
             co_return hstring{};
         }
+
+        Diag("rec http " + Utf8(path) + "=" + std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count()) + "ms" +
+            (text.empty() ? " failed" : ""));
+        if (!text.empty() && !cacheKey.empty())
+        {
+            CachePut(cacheKey, text);
+        }
+        co_return text;
     }
 
     // -----------------------------------------------------------------------
     // /v1 endpoints
     // -----------------------------------------------------------------------
+
+    IVector<w_music::RecommendItem> RecommendService::RowsOf(std::wstring_view jsonText, wchar_t const* listField)
+    {
+        auto rows = winrt::single_threaded_vector<w_music::RecommendItem>();
+        auto parsed = jsonText.empty() ? std::nullopt : wm::core::json::Parse(Utf8(jsonText));
+        if (parsed)
+        {
+            if (auto const* list = parsed->Find(Utf8(listField)); list != nullptr && list->isArray())
+            {
+                for (auto const& row : list->asArray())
+                {
+                    rows.Append(ParseRecommendRow(row));
+                }
+            }
+        }
+        return rows;
+    }
+
+    hstring RecommendService::NoteOf(std::wstring_view jsonText)
+    {
+        auto parsed = jsonText.empty() ? std::nullopt : wm::core::json::Parse(Utf8(jsonText));
+        return parsed ? hstring{ CategoryNoteOf(*parsed) } : hstring{};
+    }
 
     w_music::RecommendItem RecommendService::ParseRecommendRow(wm::core::json::Value const& row)
     {
@@ -532,11 +813,10 @@ namespace wm::app
         return item;
     }
 
-    IAsyncOperation<IVectorView<w_music::CategoryItem>> RecommendService::GetCategoriesAsync()
+    IVector<w_music::CategoryItem> RecommendService::ChipsOf(std::wstring_view jsonText)
     {
-        auto text = co_await CallAfterStartAsync(hstring{ L"GET" }, L"/v1/categories", {});
         auto result = winrt::single_threaded_vector<w_music::CategoryItem>();
-        auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
+        auto parsed = jsonText.empty() ? std::nullopt : wm::core::json::Parse(Utf8(jsonText));
         if (parsed && parsed->isArray())
         {
             for (auto const& entry : parsed->asArray())
@@ -574,21 +854,23 @@ namespace wm::app
                 }
             }
         }
-        co_return result.GetView();
+        return result;
     }
 
-    IAsyncOperation<hstring> RecommendService::DiscoveryTextAsync()
+    IAsyncOperation<IVectorView<w_music::CategoryItem>> RecommendService::GetCategoriesAsync()
     {
-        auto text = co_await CallAfterStartAsync(hstring{ L"GET" }, L"/v1/categories/discovery", {});
-        if (text.empty())
-        {
-            co_return m_lastError;
-        }
-        auto parsed = wm::core::json::Parse(Utf8(text));
+        auto text = co_await CallAfterStartAsync(hstring{ L"GET" }, L"/v1/categories", {},
+                                                 std::wstring{ kChipsKey });
+        co_return ChipsOf(text).GetView();
+    }
+
+    hstring RecommendService::DiscoveryNoteOf(std::wstring_view jsonText)
+    {
+        auto parsed = jsonText.empty() ? std::nullopt : wm::core::json::Parse(Utf8(jsonText));
         auto const* meta = parsed ? parsed->Find("meta") : nullptr;
         if (meta == nullptr || !meta->isObject())
         {
-            co_return hstring{ L"自动类别信息不可用" };
+            return hstring{ L"自动类别信息不可用" };
         }
         std::wstring const status = meta->Find("status") != nullptr
             ? std::wstring{ Utf16(meta->Find("status")->asString()) }
@@ -610,22 +892,33 @@ namespace wm::app
             // The engine itself calls anything under ~0.2 a fuzzy boundary; do
             // not let a k look like a confidence score.
             note += score < 0.25 ? L"（边界模糊，仅供参考）" : L"（簇间区分度尚可）";
-            co_return hstring{ note };
+            return hstring{ note };
         }
         if (status == L"library-too-small")
         {
-            co_return hstring{ L"曲库只有 " + std::to_wstring(library) +
-                               L" 首，不够做诚实的聚类，自动类别留空" };
+            return hstring{ L"曲库只有 " + std::to_wstring(library) +
+                            L" 首，不够做诚实的聚类，自动类别留空" };
         }
         if (status == L"no-sklearn")
         {
-            co_return hstring{ L"引擎缺 sklearn，自动类别不可用（预设类别不受影响）" };
+            return hstring{ L"引擎缺 sklearn，自动类别不可用（预设类别不受影响）" };
         }
         if (status == L"disabled")
         {
-            co_return hstring{ L"引擎设置里关闭了自动发现" };
+            return hstring{ L"引擎设置里关闭了自动发现" };
         }
-        co_return hstring{ L"自动类别未产出结果（" + (status.empty() ? hstring{ L"未知状态" } : hstring{ status }) + L"）" };
+        return hstring{ L"自动类别未产出结果（" + (status.empty() ? hstring{ L"未知状态" } : hstring{ status }) + L"）" };
+    }
+
+    IAsyncOperation<hstring> RecommendService::DiscoveryTextAsync()
+    {
+        auto text = co_await CallAfterStartAsync(hstring{ L"GET" }, L"/v1/categories/discovery", {},
+                                                 std::wstring{ kDiscoveryKey });
+        if (text.empty())
+        {
+            co_return m_lastError;
+        }
+        co_return DiscoveryNoteOf(text);
     }
 
     IAsyncOperation<IVectorView<w_music::RecommendItem>>
@@ -644,21 +937,12 @@ namespace wm::app
             body["exclude_track_ids"] = std::move(excludes);
         }
 
+        // The key ignores exclude_track_ids on purpose: what the page paints
+        // back is "the last feed I showed", whichever batch that was.
         auto text = co_await CallAfterStartAsync(hstring{ L"POST" }, L"/v1/feed/next",
-                                                 wm::core::json::Serialize(body, false));
-        auto result = winrt::single_threaded_vector<w_music::RecommendItem>();
-        auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
-        if (parsed)
-        {
-            if (auto const* items = parsed->Find("items"); items != nullptr && items->isArray())
-            {
-                for (auto const& row : items->asArray())
-                {
-                    result.Append(ParseRecommendRow(row));
-                }
-            }
-        }
-        co_return result.GetView();
+                                                 wm::core::json::Serialize(body, false),
+                                                 MakeKey(Answer::Feed, {}, limit));
+        co_return RowsOf(text, L"items").GetView();
     }
 
     IAsyncOperation<IVectorView<w_music::RecommendItem>>
@@ -668,21 +952,11 @@ namespace wm::app
         body["file_path"] = Utf8(filePath);
         body["limit"] = limit;
 
+        // Not cached: the answer belongs to whichever track was playing when it
+        // was asked, and a stale "similar to X" list is worse than a slow one.
         auto text = co_await CallAfterStartAsync(hstring{ L"POST" }, L"/v1/recommend/similar",
                                                  wm::core::json::Serialize(body, false));
-        auto result = winrt::single_threaded_vector<w_music::RecommendItem>();
-        auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
-        if (parsed)
-        {
-            if (auto const* rows = parsed->Find("recommendations"); rows != nullptr && rows->isArray())
-            {
-                for (auto const& row : rows->asArray())
-                {
-                    result.Append(ParseRecommendRow(row));
-                }
-            }
-        }
-        co_return result.GetView();
+        co_return RowsOf(text, L"recommendations").GetView();
     }
 
     std::wstring RecommendService::CategoryNoteOf(wm::core::json::Value const& answer)
@@ -869,7 +1143,8 @@ namespace wm::app
         wm::core::json::Value body = wm::core::json::Object{};
         body["category_id"] = Utf8(categoryId);
         body["limit"] = limit;
-        co_return co_await RequestCategoryAsync(wm::core::json::Serialize(body, false));
+        co_return co_await RequestCategoryAsync(wm::core::json::Serialize(body, false),
+                                                MakeKey(Answer::Category, categoryId, limit));
     }
 
     IAsyncOperation<IVectorView<w_music::RecommendItem>>
@@ -878,29 +1153,19 @@ namespace wm::app
         wm::core::json::Value body = wm::core::json::Object{};
         body["text"] = Utf8(text);
         body["limit"] = limit;
-        co_return co_await RequestCategoryAsync(wm::core::json::Serialize(body, false));
+        co_return co_await RequestCategoryAsync(wm::core::json::Serialize(body, false),
+                                                MakeKey(Answer::Text, text, limit));
     }
 
     IAsyncOperation<IVectorView<w_music::RecommendItem>>
-    RecommendService::RequestCategoryAsync(std::string body)
+    RecommendService::RequestCategoryAsync(std::string body, std::wstring cacheKey)
     {
-        auto rows = winrt::single_threaded_vector<w_music::RecommendItem>();
         m_categoryNote = {};
 
-        auto text = co_await CallAfterStartAsync(hstring{ L"POST" }, L"/v1/recommend/category", std::move(body));
-        auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
-        if (parsed)
-        {
-            if (auto const* list = parsed->Find("recommendations"); list != nullptr && list->isArray())
-            {
-                for (auto const& row : list->asArray())
-                {
-                    rows.Append(ParseRecommendRow(row));
-                }
-            }
-            m_categoryNote = hstring{ CategoryNoteOf(*parsed) };
-        }
-        co_return rows.GetView();
+        auto text = co_await CallAfterStartAsync(hstring{ L"POST" }, L"/v1/recommend/category",
+                                                 std::move(body), std::move(cacheKey));
+        m_categoryNote = NoteOf(text);
+        co_return RowsOf(text, L"recommendations").GetView();
     }
 
     IAsyncAction RecommendService::SendFeedbackAsync(hstring trackId, hstring eventId)
@@ -923,7 +1188,14 @@ namespace wm::app
         {
             co_return;
         }
-        co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/feed/reset?scope=all", "{}");
+        auto const text = co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/feed/reset?scope=all", "{}");
+        if (text.empty())
+        {
+            co_return;
+        }
+        // The feed is now a function of an empty interest model: rows cached
+        // against the old taste would be painted as if they were current.
+        InvalidateCache();
     }
 
     IAsyncOperation<hstring> RecommendService::AnalyzeFoldersAsync(std::vector<std::wstring> folders)
@@ -938,6 +1210,14 @@ namespace wm::app
         {
             co_return startError;
         }
+
+        // Analysis blocks every other engine query, so the page has to say so.
+        m_stage = static_cast<int>(Stage::Analyzing);
+        struct AnalyzeExit
+        {
+            std::atomic_int& stage;
+            ~AnalyzeExit() { stage.store(static_cast<int>(RecommendService::Stage::Ready)); }
+        } analyzeExit{ m_stage };
 
         int totalFound = 0;
         int totalIndexed = 0;
@@ -966,6 +1246,13 @@ namespace wm::app
             totalIndexed += IntOf(parsed->Find("indexed"));
             totalSkipped += IntOf(parsed->Find("skipped"));
             totalFailed += IntOf(parsed->Find("failed"));
+        }
+
+        if (totalIndexed > 0)
+        {
+            // The engine just learned new tracks: every cached ranking
+            // describes the library as it was before this scan.
+            InvalidateCache();
         }
 
         if (totalFound + totalSkipped == 0 && !errors.empty())

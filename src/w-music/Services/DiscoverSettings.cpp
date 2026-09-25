@@ -136,6 +136,10 @@ namespace wm::app
                 m_recommendServerPort = static_cast<unsigned short>(value);
             }
         }
+        if (auto const* prewarm = root->Find("recommendPrewarm"); prewarm != nullptr && prewarm->isBool())
+        {
+            m_recommendPrewarm = prewarm->asBool();
+        }
     }
 
     void DiscoverSettings::Save() const
@@ -166,6 +170,7 @@ namespace wm::app
 
         root["recommendServerDir"] = wm::core::json::Value{ Utf8(m_recommendServerDir) };
         root["recommendServerPort"] = wm::core::json::Value{ static_cast<std::int64_t>(m_recommendServerPort) };
+        root["recommendPrewarm"] = wm::core::json::Value{ m_recommendPrewarm };
 
         WriteFile(SettingsFilePath(), wm::core::json::Serialize(wm::core::json::Value{ std::move(root) }, true));
     }
@@ -316,6 +321,16 @@ namespace wm::app
             return;
         }
         m_recommendServerPort = value;
+        Save();
+    }
+
+    void DiscoverSettings::RecommendPrewarm(bool value)
+    {
+        if (m_recommendPrewarm == value)
+        {
+            return;
+        }
+        m_recommendPrewarm = value;
         Save();
     }
 

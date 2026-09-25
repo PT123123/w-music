@@ -82,6 +82,11 @@ namespace wm::app
         unsigned short RecommendServerPort() const noexcept { return m_recommendServerPort; }
         void RecommendServerPort(unsigned short value);
 
+        /// 应用启动后要不要在后台把推荐引擎拉起来。第一次打开「个性推荐」时
+        /// 置为 true：没用过这页的人不该被塞一个常驻的 Python 进程。
+        bool RecommendPrewarm() const noexcept { return m_recommendPrewarm; }
+        void RecommendPrewarm(bool value);
+
         static constexpr std::size_t MaxHistory = 12;
 
     private:
@@ -100,6 +105,7 @@ namespace wm::app
         std::array<double, EqBandCount> m_eqGains{};
         std::wstring m_recommendServerDir;
         unsigned short m_recommendServerPort = RecommendPortDefault;
+        bool m_recommendPrewarm = false;
     };
 
     DiscoverSettings& Settings();

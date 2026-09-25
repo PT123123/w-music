@@ -66,6 +66,16 @@
     The rename is a raw in-place edit of the metadata #Strings heap: the new name
     is shorter than the old, so we overwrite it plus its NUL and leave the tail as
     unreferenced garbage -- no other offset in the file moves.
+
+    4. midlrt does not read .idl as UTF-8 (these files carry no BOM), so a
+       multi-byte character at end of line can eat the newline: the last byte of
+       a closing full stop (0x82) paired with 0x0A swallowed the line break, the
+       declaration on the next line became part of its /// comment, and that
+       property never reached the winmd. midlrt exits 0 and nothing complains --
+       until XamlCompiler pass2 fails on the x:Bind that needs it with WMC9999,
+       whose text is masked because the compiler's ErrorMessages.resources are
+       missing from the NuGet package. So: keep CJK mid-line and close every
+       .idl line with ASCII (no line may end with a byte >= 0x81).
 #>
 
 Set-StrictMode -Version Latest

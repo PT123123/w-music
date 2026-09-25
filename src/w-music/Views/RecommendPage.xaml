@@ -98,6 +98,32 @@
                                    TextTrimming="CharacterEllipsis" />
                     </Grid>
 
+                    <!-- 等待条：引擎可能在冷启动（秒级），也可能在分析曲库
+                         （分钟级），只转圈不说明在等什么 -->
+                    <Border Visibility="{x:Bind ViewModel.WaitingVisibility, Mode=OneWay}"
+                            CornerRadius="10"
+                            Padding="14,10"
+                            BorderBrush="{ThemeResource WmBorderBrush}"
+                            BorderThickness="1"
+                            Background="{ThemeResource WmPressBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <ProgressRing Width="16" Height="16"
+                                          IsActive="True"
+                                          VerticalAlignment="Center" />
+                            <TextBlock Text="{x:Bind ViewModel.BusyText, Mode=OneWay}"
+                                       FontSize="12"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 缓存先行：列表已经是上次的结果，正在等最新的 -->
+                    <TextBlock Visibility="{x:Bind ViewModel.CacheCaptionVisibility, Mode=OneWay}"
+                               Text="{x:Bind ViewModel.CacheCaption, Mode=OneWay}"
+                               FontSize="12"
+                               Opacity="0.6"
+                               TextWrapping="Wrap" />
+
                     <!-- 引擎对这份列表的诚实说明：支持度 / 估计值过滤 / 没答上的词 -->
                     <Border Visibility="{x:Bind ViewModel.CategoryNoteVisibility, Mode=OneWay}"
                             CornerRadius="10"

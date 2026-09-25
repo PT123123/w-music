@@ -108,6 +108,13 @@ namespace w_music
         /// "__text__" = the free-text query box.
         String SelectedCategoryId { get; };
         Boolean IsBusy { get; };
+        /// What the current wait is made of, e.g. "正在启动本地引擎…".
+        /// The cold start is seconds long, so a plain "加载中" would not explain it.
+        String BusyText { get; };
+        /// Cache-first caption, e.g. "以下是 3 分钟前的结果, 正在向引擎要最新的".
+        String CacheCaption { get; };
+        Microsoft.UI.Xaml.Visibility WaitingVisibility { get; };
+        Microsoft.UI.Xaml.Visibility CacheCaptionVisibility { get; };
         Boolean HasItems { get; };
         Microsoft.UI.Xaml.Visibility ItemsVisibility { get; };
         Microsoft.UI.Xaml.Visibility EmptyVisibility { get; };

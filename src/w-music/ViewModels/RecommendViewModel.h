@@ -38,6 +38,25 @@ namespace winrt::w_music::implementation
         }
         winrt::hstring SelectedCategoryId() const noexcept { return hstring{ m_selectedCategoryId }; }
         bool IsBusy() const noexcept { return m_isBusy; }
+        /// What the wait is made of ("正在启动本地引擎…" / "引擎正在分析曲库…"),
+        /// empty when nothing runs. The engine's cold start is seconds long and
+        /// "加载中" would not explain why.
+        winrt::hstring BusyText() const noexcept { return m_busyText; }
+        /// Caption shown while a cached list is on screen and a live answer is
+        /// still coming; empty once the live rows landed.
+        winrt::hstring CacheCaption() const noexcept { return m_cacheCaption; }
+        winrt::Microsoft::UI::Xaml::Visibility WaitingVisibility() const noexcept
+        {
+            return m_isBusy
+                ? winrt::Microsoft::UI::Xaml::Visibility::Visible
+                : winrt::Microsoft::UI::Xaml::Visibility::Collapsed;
+        }
+        winrt::Microsoft::UI::Xaml::Visibility CacheCaptionVisibility() const noexcept
+        {
+            return m_cacheCaption.empty()
+                ? winrt::Microsoft::UI::Xaml::Visibility::Collapsed
+                : winrt::Microsoft::UI::Xaml::Visibility::Visible;
+        }
         bool HasItems() const noexcept { return m_items.Size() > 0; }
         /// So XAML can hide the empty-state text without a converter.
         winrt::Microsoft::UI::Xaml::Visibility ItemsVisibility() const noexcept
@@ -48,7 +67,10 @@ namespace winrt::w_music::implementation
         }
         winrt::Microsoft::UI::Xaml::Visibility EmptyVisibility() const noexcept
         {
-            return HasItems()
+            // While a request is running the waiting bar speaks for the page:
+            // "列表还是空的，去分析曲库" is not advice for an engine that is
+            // still booting.
+            return (HasItems() || m_isBusy)
                 ? winrt::Microsoft::UI::Xaml::Visibility::Collapsed
                 : winrt::Microsoft::UI::Xaml::Visibility::Visible;
         }
@@ -83,15 +105,31 @@ namespace winrt::w_music::implementation
 
     private:
         void RaisePropertyChanged(std::wstring_view const& name);
-        void SetBusy(bool value);
+        void SetWaiting(bool busy);
         void SetStatus(hstring const& text);
         /// Replaces the caveats line under the list header.
         void SetCategoryNote(hstring const& text);
-        /// Runs |pending| on a worker thread and swaps the result into Items.
-        winrt::Windows::Foundation::IAsyncAction LoadListAsync(
+        /// Paints the last chips / discovery caption from disk so the chip rows
+        /// are not empty while the engine boots.
+        void PaintCachedChips();
+        /// Starts one list refresh under |header|. |cached| / |cachedNote| /
+        /// |cachedAge| come from the disk cache and go on screen immediately, so
+        /// the page never blanks while the engine answers. Returns the token
+        /// FinishListAsync compares against.
+        uint32_t BeginList(hstring header,
+            winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::RecommendItem> const& cached,
+            hstring const& cachedNote,
+            hstring const& cachedAge);
+        /// Awaits |pending| and swaps the live rows in -- unless a newer action
+        /// already took the list (|token|), or the engine failed, in which case
+        /// whatever is on screen stays and the status line says why.
+        /// |categoryAnswer| means the engine's caveats of that answer belong to
+        /// this list; |chipNote| is the auto-category caption appended to them.
+        winrt::Windows::Foundation::IAsyncAction FinishList(uint32_t token,
             winrt::Windows::Foundation::IAsyncOperation<
                 winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::RecommendItem>> pending,
-            hstring header);
+            bool categoryAnswer,
+            hstring chipNote);
         winrt::Windows::Foundation::IAsyncAction LoadFeedAsync(bool excludeCurrent);
         /// Refetch chips + the discovery caption. Called on first entry and
         /// after a library analysis, since auto-* categories are a function
@@ -110,9 +148,14 @@ namespace winrt::w_music::implementation
         hstring m_feedStateText;
         hstring m_discoveryText;
         hstring m_categoryNote;
+        hstring m_busyText;
+        hstring m_cacheCaption;
         std::wstring m_selectedCategoryId;
         bool m_isBusy = false;
         bool m_initialized = false;
+        /// Bumped by every list action; an answer whose token is older than this
+        /// belongs to a click the user has since replaced.
+        uint32_t m_listToken = 0;
 
         winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
     };

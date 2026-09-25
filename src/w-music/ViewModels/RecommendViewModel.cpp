@@ -4,6 +4,7 @@
 #include "ViewModels/RecommendViewModel.g.cpp"
 
 #include "Services/AppPaths.h"
+#include "Services/DiscoverSettings.h"
 #include "Services/LibraryService.h"
 #include "Services/RecommendService.h"
 #include "Services/Services.h"
@@ -37,6 +38,38 @@ namespace winrt::w_music::implementation
             track.FilePath(row.FilePath());
             return track;
         }
+
+        /// Rows per list. Also the cache key's limit component: a different
+        /// limit is a different answer, and the page only ever asks for one.
+        constexpr int32_t ListLimit = 30;
+
+        using Answer = wm::app::RecommendService::Answer;
+
+        /// One caveat line out of the engine's answer and the chip's caption.
+        hstring JoinNotes(hstring const& first, hstring const& second)
+        {
+            if (first.empty())
+            {
+                return second;
+            }
+            return second.empty() ? first : first + hstring{ L"；" } + second;
+        }
+
+        /// The waiting hint is staged because the waits are not comparable: a
+        /// cold engine takes seconds, a warm query tens of milliseconds, and an
+        /// analysis runs minutes with everything else queued behind it.
+        hstring WaitingTextFor(wm::app::RecommendService::Stage stage)
+        {
+            switch (stage)
+            {
+            case wm::app::RecommendService::Stage::Starting:
+                return hstring{ L"正在启动本地推荐引擎（首次约 5～10 秒）…" };
+            case wm::app::RecommendService::Stage::Analyzing:
+                return hstring{ L"引擎正在分析曲库，这个请求排在它后面…" };
+            default:
+                return hstring{ L"正在向本地引擎查询…" };
+            }
+        }
     } // namespace
 
     RecommendViewModel::RecommendViewModel()
@@ -55,14 +88,17 @@ namespace winrt::w_music::implementation
         m_propertyChanged(*this, Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
     }
 
-    void RecommendViewModel::SetBusy(bool value)
+    void RecommendViewModel::SetWaiting(bool busy)
     {
-        if (m_isBusy == value)
-        {
-            return;
-        }
-        m_isBusy = value;
+        m_isBusy = busy;
+        // Re-raised even when the flag did not change: the stage can move on
+        // while a request is still running, and that is worth a new sentence.
+        m_busyText = busy ? WaitingTextFor(wm::app::Recommend().CurrentStage()) : hstring{};
         RaisePropertyChanged(L"IsBusy");
+        RaisePropertyChanged(L"BusyText");
+        RaisePropertyChanged(L"WaitingVisibility");
+        // The empty state yields to the waiting bar.
+        RaisePropertyChanged(L"EmptyVisibility");
     }
 
     void RecommendViewModel::SetStatus(hstring const& text)
@@ -84,19 +120,53 @@ namespace winrt::w_music::implementation
 
     IAsyncAction RecommendViewModel::InitializeAsync()
     {
+        // Every visit re-states the library size: tracks get added between
+        // visits, and it is what namespaces the disk cache.
+        wm::app::Recommend().SetLibrarySize(
+            static_cast<int32_t>(wm::app::Library().Tracks().Size()));
+
         if (m_initialized)
         {
             co_return;
         }
         m_initialized = true;
 
-        SetStatus(L"正在启动本地推荐引擎…");
-        SetBusy(true);
-        co_await LoadCategoriesAsync();
-        SetBusy(false);
+        // Reaching this page at all is the signal that prewarming the engine at
+        // startup is worth a background Python process next run.
+        wm::app::Settings().RecommendPrewarm(true);
 
-        co_await RefreshFeedStateAsync();
+        // Everything the engine can answer from disk goes on screen first: the
+        // live calls below may wait on a seconds-long cold start, and a blank
+        // page cannot show a waiting hint.
+        PaintCachedChips();
+        LoadCategoriesAsync();
         co_await LoadFeedAsync(false);
+        co_await RefreshFeedStateAsync();
+    }
+
+    void RecommendViewModel::PaintCachedChips()
+    {
+        auto const cached = wm::app::Recommend().CachedChips();
+        if (cached == nullptr || cached.Size() == 0)
+        {
+            // Nothing on disk yet: the chip rows stay empty and the live call
+            // fills them, rather than showing a lone "为你推荐".
+            return;
+        }
+
+        m_categories.Clear();
+        auto feedChip = winrt::make<CategoryItem>();
+        feedChip.Id(hstring{});
+        feedChip.Label(hstring{ L"为你推荐" });
+        m_categories.Append(std::move(feedChip));
+        for (auto const& chip : cached)
+        {
+            m_categories.Append(chip);
+        }
+
+        m_discoveryText = wm::app::Recommend().CachedDiscoveryText();
+        RaisePropertyChanged(L"DiscoveryText");
+        RaisePropertyChanged(L"Categories");
     }
 
     IAsyncAction RecommendViewModel::LoadCategoriesAsync()
@@ -105,6 +175,8 @@ namespace winrt::w_music::implementation
         auto discovery = co_await wm::app::Recommend().DiscoveryTextAsync();
         co_await wm::app::ResumeOnUi();
 
+        // Swapped in as a whole, after the await: the cached chips stay up for
+        // the duration of the request instead of leaving the rows empty.
         m_categories.Clear();
 
         // First chip is the pseudo-category "为你推荐" (= back to the feed).
@@ -117,35 +189,102 @@ namespace winrt::w_music::implementation
             m_categories.Append(chip);
         }
 
-        m_discoveryText = discovery;
+        // An empty answer means the engine could not be reached: keep the
+        // caption the cache painted instead of blanking the section.
+        auto const discoveryError = wm::app::Recommend().LastError();
+        if (discoveryError.empty())
+        {
+            m_discoveryText = discovery;
+        }
         RaisePropertyChanged(L"DiscoveryText");
         RaisePropertyChanged(L"Categories");
         RaisePropertyChanged(L"SelectedCategoryId");
     }
 
-    IAsyncAction RecommendViewModel::LoadListAsync(IAsyncOperation<IVectorView<w_music::RecommendItem>> pending,
-                                                   hstring header)
+    uint32_t RecommendViewModel::BeginList(
+        hstring header,
+        IVectorView<w_music::RecommendItem> const& cached,
+        hstring const& cachedNote,
+        hstring const& cachedAge)
     {
-        auto rows = co_await pending;
-        co_await wm::app::ResumeOnUi();
+        auto const token = ++m_listToken;
 
         m_items.Clear();
-        for (auto const& row : rows)
+        for (auto const& row : cached)
         {
             m_items.Append(row);
         }
-        wm::app::Diag("rec list bound n=" + std::to_string(static_cast<int>(m_items.Size())));
-
         m_listHeader = std::move(header);
+        SetCategoryNote(cachedNote);
+        // Only worth saying when rows really came from disk: an empty list with
+        // this caption would point at nothing.
+        m_cacheCaption = m_items.Size() > 0 && !cachedAge.empty()
+            ? hstring{ std::wstring{ L"以下是 " } + std::wstring{ cachedAge } +
+                       L"的结果，正在向引擎要最新的" }
+            : hstring{};
+        SetWaiting(true);
+
         RaisePropertyChanged(L"ListHeader");
         RaisePropertyChanged(L"HasItems");
         RaisePropertyChanged(L"ItemsVisibility");
         RaisePropertyChanged(L"EmptyVisibility");
+        RaisePropertyChanged(L"CacheCaption");
+        RaisePropertyChanged(L"CacheCaptionVisibility");
+        return token;
+    }
 
-        auto const error = wm::app::Recommend().LastError();
+    IAsyncAction RecommendViewModel::FinishList(uint32_t token,
+                                                IAsyncOperation<IVectorView<w_music::RecommendItem>> pending,
+                                                bool categoryAnswer,
+                                                hstring chipNote)
+    {
+        auto rows = co_await pending;
+        co_await wm::app::ResumeOnUi();
+
+        // The user clicked something newer while this answer was on its way:
+        // that action owns the list, and painting a stale answer over it would
+        // look like the chip does nothing.
+        if (token != m_listToken)
+        {
+            co_return;
+        }
+
+        auto& engine = wm::app::Recommend();
+        auto const error = engine.LastError();
+        if (error.empty())
+        {
+            m_items.Clear();
+            for (auto const& row : rows)
+            {
+                m_items.Append(row);
+            }
+            // Live rows on screen: the "cached" caption has done its job.
+            m_cacheCaption = hstring{};
+            RaisePropertyChanged(L"CacheCaption");
+            RaisePropertyChanged(L"CacheCaptionVisibility");
+
+            if (categoryAnswer)
+            {
+                // Read after the await: the service keeps the caveats of the
+                // answer it just returned, and the chip caption belongs to it.
+                SetCategoryNote(JoinNotes(engine.LastCategoryNote(), chipNote));
+            }
+        }
+        // On failure whatever is on screen (the cached rows, or nothing) stays,
+        // and the caption keeps saying it is an older answer.
+        wm::app::Diag("rec list bound n=" + std::to_string(static_cast<int>(m_items.Size())) +
+                      std::string{ error.empty() ? "" : " cached" });
+
+        RaisePropertyChanged(L"HasItems");
+        RaisePropertyChanged(L"ItemsVisibility");
+        RaisePropertyChanged(L"EmptyVisibility");
+
         if (!error.empty())
         {
-            SetStatus(error);
+            SetStatus(m_items.Size() > 0
+                ? hstring{ std::wstring{ L"这次没有问到引擎：" } + std::wstring{ error } +
+                           L"（上面是上次的结果）" }
+                : error);
         }
         else if (m_items.Size() == 0)
         {
@@ -157,7 +296,7 @@ namespace winrt::w_music::implementation
                 ? hstring{ L"推荐来自本地音频分析（听感相似度），不是平台热榜" }
                 : m_feedStateText);
         }
-        SetBusy(false);
+        SetWaiting(false);
     }
 
     IAsyncAction RecommendViewModel::LoadFeedAsync(bool excludeCurrent)
@@ -172,12 +311,16 @@ namespace winrt::w_music::implementation
         }
         m_selectedCategoryId.clear();
         RaisePropertyChanged(L"SelectedCategoryId");
-        // The feed has no category caveats of its own.
-        SetCategoryNote(hstring{});
 
-        SetBusy(true);
-        auto pending = wm::app::Recommend().GetFeedAsync(30, std::move(excludes));
-        co_await LoadListAsync(std::move(pending), hstring{ L"为你推荐" });
+        // "换一批" is the same answer shape, so the cached batch (which is what
+        // is on screen) paints again under the same header.
+        auto& engine = wm::app::Recommend();
+        auto const token = BeginList(hstring{ L"为你推荐" },
+                                     engine.CachedRows(Answer::Feed, hstring{}, ListLimit),
+                                     hstring{},
+                                     engine.CachedAgeText(Answer::Feed, hstring{}, ListLimit));
+        auto pending = engine.GetFeedAsync(ListLimit, std::move(excludes));
+        co_await FinishList(token, std::move(pending), false, hstring{});
     }
 
     IAsyncAction RecommendViewModel::RefreshFeedStateAsync()
@@ -223,20 +366,18 @@ namespace winrt::w_music::implementation
 
         m_selectedCategoryId = std::wstring{ id };
         RaisePropertyChanged(L"SelectedCategoryId");
-        SetBusy(true);
         wm::app::Diag("rec category select id=" + wm::app::Utf8(std::wstring{ id }));
-        auto pending = wm::app::Recommend().GetCategoryAsync(id, 30);
-        hstring header = hstring{ L"曲风：" } + label;
-        // The note describes exactly this answer, so it is read after the
-        // await (the service keeps the caveats of the last category call).
-        co_await LoadListAsync(std::move(pending), std::move(header));
-        SetCategoryNote(wm::app::Recommend().LastCategoryNote());
-        if (!note.empty())
-        {
-            SetCategoryNote(m_categoryNote.empty()
-                ? note
-                : m_categoryNote + hstring{ L"；" } + note);
-        }
+
+        auto& engine = wm::app::Recommend();
+        // The chip's own caption belongs to this answer either way, cached or
+        // live -- it says what the category is, not what the engine thinks of
+        // the rows.
+        auto const token = BeginList(hstring{ L"曲风：" } + label,
+                                     engine.CachedRows(Answer::Category, id, ListLimit),
+                                     JoinNotes(engine.CachedNote(Answer::Category, id, ListLimit), note),
+                                     engine.CachedAgeText(Answer::Category, id, ListLimit));
+        auto pending = engine.GetCategoryAsync(id, ListLimit);
+        co_await FinishList(token, std::move(pending), true, note);
         wm::app::Diag("rec category select done");
     }
 
@@ -251,11 +392,14 @@ namespace winrt::w_music::implementation
 
         m_selectedCategoryId = L"__text__";
         RaisePropertyChanged(L"SelectedCategoryId");
-        SetBusy(true);
-        auto pending = wm::app::Recommend().SearchByTextAsync(text, 30);
-        hstring header = hstring{ L"文本条件：" } + text;
-        co_await LoadListAsync(std::move(pending), std::move(header));
-        SetCategoryNote(wm::app::Recommend().LastCategoryNote());
+
+        auto& engine = wm::app::Recommend();
+        auto const token = BeginList(hstring{ L"文本条件：" } + text,
+                                     engine.CachedRows(Answer::Text, text, ListLimit),
+                                     engine.CachedNote(Answer::Text, text, ListLimit),
+                                     engine.CachedAgeText(Answer::Text, text, ListLimit));
+        auto pending = engine.SearchByTextAsync(text, ListLimit);
+        co_await FinishList(token, std::move(pending), true, hstring{});
     }
 
     IAsyncAction RecommendViewModel::LoadSimilarNowAsync()
@@ -275,32 +419,35 @@ namespace winrt::w_music::implementation
 
         m_selectedCategoryId = L"__similar__";
         RaisePropertyChanged(L"SelectedCategoryId");
-        SetCategoryNote(hstring{});
-        SetBusy(true);
-        auto pending = wm::app::Recommend().GetSimilarByPathAsync(seed.FilePath(), 30);
-        hstring header = hstring{ L"与《" } + seed.Title() + hstring{ L"》听感相似" };
-        co_await LoadListAsync(std::move(pending), std::move(header));
+        // Not cached: the answer belongs to whichever track is playing now, so
+        // the list goes empty while the engine works (BeginList clears it).
+        auto const token = BeginList(hstring{ L"与《" } + seed.Title() + hstring{ L"》听感相似" },
+                                     winrt::single_threaded_vector<w_music::RecommendItem>().GetView(),
+                                     hstring{}, hstring{});
+        auto pending = wm::app::Recommend().GetSimilarByPathAsync(seed.FilePath(), ListLimit);
+        co_await FinishList(token, std::move(pending), false, hstring{});
     }
 
     IAsyncAction RecommendViewModel::AnalyzeLibraryAsync()
     {
-        SetBusy(true);
+        SetWaiting(true);
         SetStatus(hstring{ L"正在分析本地曲库（首次可能需要几分钟，完成后自动刷新）…" });
         auto summary = co_await wm::app::Recommend().AnalyzeFoldersAsync(wm::app::Library().FolderPaths());
         co_await wm::app::ResumeOnUi();
         SetStatus(summary);
-        SetBusy(false);
+        SetWaiting(false);
 
         co_await RefreshFeedStateAsync();
         // auto-* categories are a function of the library: re-cluster after
-        // the analysis instead of showing chips for the old library.
+        // the analysis instead of showing chips for the old library. The
+        // analysis cleared the disk cache, so this is a live call.
         co_await LoadCategoriesAsync();
         co_await LoadFeedAsync(false);
     }
 
     IAsyncAction RecommendViewModel::ResetTasteAsync()
     {
-        SetBusy(true);
+        SetWaiting(true);
         co_await wm::app::Recommend().ResetTasteAsync();
         co_await wm::app::ResumeOnUi();
 

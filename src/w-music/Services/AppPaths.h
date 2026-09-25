@@ -15,6 +15,9 @@ namespace wm::app
     std::filesystem::path DataDirectory();
     std::filesystem::path LibraryFilePath();
     std::filesystem::path SettingsFilePath();
+    /// Last-seen recommend-engine answers, so the page can paint instantly (and
+    /// offline) instead of waiting for the Python process to boot.
+    std::filesystem::path RecommendCacheFilePath();
     void EnsureDataDirectory();
 
     // ---- UI thread helpers ----

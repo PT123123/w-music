@@ -263,6 +263,11 @@ namespace wm::app
         return DataDirectory() / L"settings.json";
     }
 
+    std::filesystem::path RecommendCacheFilePath()
+    {
+        return DataDirectory() / L"recommend-cache.json";
+    }
+
     void EnsureDataDirectory()
     {
         std::error_code ec;

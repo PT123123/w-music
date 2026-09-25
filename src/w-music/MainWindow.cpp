@@ -302,6 +302,15 @@ namespace winrt::w_music::implementation
             // 把窗口收进托盘，播放继续。
             AppWindow().Closing({ this, &MainWindow::OnAppWindowClosing });
         }
+
+        // 上次打开过「个性推荐」就把引擎在后台拉起来：冷启动要 5～10 秒，
+        // 让它在窗口出来后就跑，用户点到那页时已经是热的。PrewarmAsync 立刻
+        // 切到后台线程，UI 不等待；没用过这页的人不会被塞一个常驻 Python。
+        if (wm::app::Settings().RecommendPrewarm())
+        {
+            wm::app::Diag("rec prewarm scheduled");
+            wm::app::Recommend().PrewarmAsync();
+        }
     }
 
     void MainWindow::OnWindowClosed(Windows::Foundation::IInspectable const&, WindowEventArgs const&)
