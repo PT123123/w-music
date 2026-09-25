@@ -106,8 +106,19 @@ just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\works
 ## 已实现的功能
 
 ### 1. 曲库 / 发现页
-- `FolderPicker` 选目录，权限 token 存进 `FutureAccessList`，下次启动自动重扫。
-- 递归扫描，读取标题/艺术家/专辑/时长/码率，重扫不会清掉播放次数与喜爱状态。
+- 「**添加音乐文件夹**」走 shell 的 `IFileOpenDialog`（`FOS_PICKFOLDERS`）拿**绝对路径**：系统 COM 类，
+  非打包进程也能解析。不用 `Windows.Storage.Pickers.FolderPicker` + `FutureAccessList`——那两个绑在
+  **包身份**上，本应用是非打包的，调用即 `0x80040154 没有注册类`。
+- 因此曲库记录的是路径而不是授权 token：`scanFolders` 与 `library.json` 一起放在
+  `%LOCALAPPDATA%\w-music`，**部署新版本只换 `C:\workshop\w-music-<版本>` 目录，曲库与歌单不受影响**。
+- 递归扫描，读取标题/艺术家/专辑/时长/码率，重扫不会清掉播放次数与喜爱状态；扫描按 100 首一批入库并落盘，
+  中途崩溃也能在下一次启动时被重扫接上。收尾（歌单计数/落盘）出错只记 `diag.log`，不会把已导入的歌报成"导入失败"。
+- **容器存 WinRT 对象不用 `map[id] = item`**：下标运算会**默认构造**一个 `TrackItem`，而 C++/WinRT 给可激活
+  类生成的默认构造走的是**类激活**（RoActivateInstance）——非打包进程没有类注册，于是 `RefreshTracks()` /
+  `RefreshPlaylists()` 在放进第一行之后就被 `0x80040154 没有注册类` 打断：`library.json` 明明读到了 271 首，
+  侧栏歌单却一直空白，状态条还报"导入失败：没有注册类"。改用 `insert_or_assign`（只赋值，不默认构造）；
+  扫描入库那条路一直用 `emplace`，所以它从没坏过——这正是"歌过一会儿又自己冒出来"的原因。
+  `diag.log` 的 `bound lists tracks=… playlists=…` 行用来看两条列表有没有真被填上（正常应为 tracks=<曲库数> playlists=2+N）。
 - 发现页提供 **每日推荐**（随机）、**最近添加**、**常听**，以及本地曲库搜索（标题/艺术家/专辑）。
 
 ### 2. 在线发现（独立 tab）
@@ -205,8 +216,10 @@ QQ 音乐（`QqSource::Lyric` 歌词解析、`QqLoginFlow::Hash33`、二维码�
 ## 已知限制 / 下一步
 
 - 封面：目前是统一占位图标，未读取内嵌封面（可用 `StorageFile.GetThumbnailAsync(MusicView)` 填 `TrackItem.Cover`）。
-- 下载：已接通（`OnlineProviderService::DownloadAsync`：解析地址 → 下载到 `LocalState\Downloads`
+- 下载：已接通（`OnlineProviderService::DownloadAsync`：解析地址 → 下载到 `%LOCALAPPDATA%\w-music\Downloads`
   → 自动导入曲库；适配器有 lyric step 时会顺带存同名 `.lrc`）。尚未做断点续传与并发队列；
   在线结果列表也还没有封面图。
+- 导入/扫描的收尾步骤（刷新歌单计数、落盘）单独记在 `diag.log` 的 `scan tail <步骤> hr=…` 行里：
+  它们失败不会再把已经入库的歌报成"导入失败"，状态条会改说"（收尾步骤出错：…）"。
 - 数据规模到几万首时，JSON 全量读写会变慢，可替换成 SQLite（`LibraryStore` 已隔离在 core 层）。
 - 歌词没有桌面歌词（悬浮窗），可用 `AppWindow` 的 `Presenter` 做 Always-On-Top 小窗。

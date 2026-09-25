@@ -876,7 +876,7 @@ namespace winrt::w_music::implementation
                 auto item = ToNet24Item(song);
                 for (winrt::w_music::QualityChipItem const& chip : item.Qualities())
                 {
-                    byChipKey[std::wstring{ chip.Key().c_str() }] = item;
+                    byChipKey.insert_or_assign(std::wstring{ chip.Key().c_str() }, item);
                 }
                 rows.push_back(std::move(item));
             }

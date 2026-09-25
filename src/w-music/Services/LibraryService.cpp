@@ -7,9 +7,11 @@
 #include "Models/PlaylistItem.h"
 #include "Models/TrackItem.h"
 
+#include <shobjidl.h>
 #include <shobjidl_core.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <random>
 #include <unordered_set>
 
@@ -17,9 +19,7 @@ using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
 using namespace Windows::Storage;
-using namespace Windows::Storage::AccessCache;
 using namespace Windows::Storage::FileProperties;
-using namespace Windows::Storage::Pickers;
 using namespace Windows::Storage::Streams;
 
 namespace wm::app
@@ -131,6 +131,35 @@ namespace wm::app
             return Utf8(std::wstring_view{ value.c_str(), value.size() });
         }
 
+        std::string HrText(winrt::hresult hr)
+        {
+            char buffer[16]{};
+            snprintf(buffer, sizeof(buffer), "0x%08X", static_cast<uint32_t>(static_cast<int32_t>(hr)));
+            return buffer;
+        }
+
+        /// A step that only re-renders or re-persists state the caller already
+        /// produced. Failing it must not undo that work -- and because these run
+        /// inside coroutines nobody awaits, the error is named (step + HRESULT)
+        /// in diag.log and swallowed here rather than unwinding the caller.
+        template <typename Fn>
+        void Guarded(char const* step, Fn&& fn)
+        {
+            try
+            {
+                fn();
+            }
+            catch (hresult_error const& exception)
+            {
+                Diag(std::string{ "scan tail " } + step + " hr=" + HrText(exception.code()) +
+                     " msg=" + Utf8(exception.message().c_str()));
+            }
+            catch (...)
+            {
+                Diag(std::string{ "scan tail " } + step + " failed");
+            }
+        }
+
         class ScanGuard
         {
         public:
@@ -142,6 +171,42 @@ namespace wm::app
         private:
             std::atomic_bool& m_active;
         };
+
+        /// The shell's own folder dialog: IFileOpenDialog with FOS_PICKFOLDERS.
+        /// Both it and IShellItem are system-cached COM classes, so they resolve
+        /// for an unpackaged process -- unlike the identity-bound WinRT types the
+        /// picker used to sit on. Returns an empty string on cancel; throws the
+        /// localized COM error when the dialog itself cannot be created.
+        std::wstring PickFolder(HWND hwnd)
+        {
+            IFileOpenDialog* created = nullptr;
+            winrt::check_hresult(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                                  IID_PPV_ARGS(&created)));
+            winrt::com_ptr<IFileOpenDialog> dialog;
+            dialog.attach(created);
+
+            DWORD options = FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM;
+            winrt::check_hresult(dialog->GetOptions(&options));
+            winrt::check_hresult(dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM));
+
+            const HRESULT shown = dialog->Show(hwnd);
+            if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+            {
+                return {};
+            }
+            winrt::check_hresult(shown);
+
+            IShellItem* selectedItem = nullptr;
+            winrt::check_hresult(dialog->GetResult(&selectedItem));
+            winrt::com_ptr<IShellItem> item;
+            item.attach(selectedItem);
+
+            wchar_t* rawPath = nullptr;
+            winrt::check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH, &rawPath));
+            const std::wstring path{ rawPath != nullptr ? rawPath : L"" };
+            CoTaskMemFree(rawPath);
+            return path;
+        }
     } // namespace
 
     LibraryService::LibraryService()
@@ -158,12 +223,19 @@ namespace wm::app
             m_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
         }
         EnsureDataDirectory();
+        const std::string file = LibraryFilePath().string();
         std::string error;
-        m_store.Load(LibraryFilePath().string(), &error);
+        const bool loaded = m_store.Load(file, &error);
+        Diag("library load file=" + Utf8(LibraryFilePath().wstring()) + " ok=" + (loaded ? "1" : "0") +
+             " error=" + error);
         m_store.EnsureBuiltin(wm::core::PlaylistKind::Favorites, "我喜欢的音乐");
         m_store.EnsureBuiltin(wm::core::PlaylistKind::Recent, "最近播放");
-        RefreshTracks();
-        RefreshPlaylists();
+        Diag("library loaded tracks=" + std::to_string(m_store.Data().tracks.size()) +
+             " folders=" + std::to_string(m_store.Data().scanFolders.size()));
+        Guarded("track list", [&] { RefreshTracks(); });
+        Guarded("playlist list", [&] { RefreshPlaylists(); });
+        Diag("bound lists tracks=" + std::to_string(m_tracks.Size()) +
+             " playlists=" + std::to_string(m_playlists.Size()));
     }
 
     void LibraryService::Save()
@@ -196,7 +268,10 @@ namespace wm::app
         {
             auto item = EnsureTrackItem(record);
             m_tracks.Append(item);
-            m_trackIndex[Utf16(record.id)] = item;
+            // Not map::operator[]: that default-constructs a TrackItem, and C++/WinRT
+            // builds one by *activating* w_music.TrackItem -- which an unpackaged
+            // process cannot resolve, so it threw 0x80040154 (没有注册类) per row.
+            m_trackIndex.insert_or_assign(Utf16(record.id), item);
         }
     }
 
@@ -221,7 +296,22 @@ namespace wm::app
             }
 
             m_playlists.Append(item);
-            m_playlistIndex[Utf16(record.id)] = item;
+            // insert_or_assign for the reason given in RefreshTracks.
+            m_playlistIndex.insert_or_assign(Utf16(record.id), item);
+        }
+    }
+
+    void LibraryService::SyncPlaylistCounts()
+    {
+        // A scan changes which tracks exist, never which playlists do, so the
+        // bound items are updated in place instead of rebuilt: Clear()/Append()
+        // here would tear down and re-create every container the sidebar shows.
+        for (const auto& record : m_store.Data().playlists)
+        {
+            if (const auto it = m_playlistIndex.find(Utf16(record.id)); it != m_playlistIndex.end())
+            {
+                it->second.TrackCount(static_cast<int32_t>(record.trackIds.size()));
+            }
         }
     }
 
@@ -317,59 +407,6 @@ namespace wm::app
         RefreshTracks();
         Save();
         co_return FindTrack(hstring{ Utf16(wm::core::LibraryStore::MakeTrackId(Utf8(path))) });
-    }
-
-    IAsyncOperation<int> LibraryService::ScanFolderAsync(StorageFolder folder)
-    {
-        int scanned = 0;
-        if (folder == nullptr)
-        {
-            co_return scanned;
-        }
-
-        try
-        {
-            auto items = co_await folder.GetItemsAsync();
-            co_await wm::app::ResumeOnUi();
-            for (auto const& item : items)
-            {
-                if (item.IsOfType(StorageItemTypes::Folder))
-                {
-                    try
-                    {
-                        const int child = co_await ScanFolderAsync(item.as<StorageFolder>());
-                        co_await wm::app::ResumeOnUi();
-                        scanned += child;
-                    }
-                    catch (...)
-                    {
-                    }
-                }
-                else if (item.IsOfType(StorageItemTypes::File))
-                {
-                    auto file = item.as<StorageFile>();
-                    if (!IsAudioExtension(std::wstring_view{ file.FileType().c_str(), file.FileType().size() }))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        if (IngestFile(file, nullptr))
-                        {
-                            ++scanned;
-                        }
-                    }
-                    catch (...)
-                    {
-                    }
-                }
-            }
-        }
-        catch (...)
-        {
-        }
-        co_return scanned;
     }
 
     IAsyncOperation<int> LibraryService::ScanPathAsync(std::wstring const& path, std::function<void(int)> progress)
@@ -488,45 +525,23 @@ namespace wm::app
     {
         if (m_scanInProgress.exchange(true))
         {
+            Diag("add-folder skipped: another scan is running");
             co_return 0;
         }
         ScanGuard guard(m_scanInProgress);
 
-        FolderPicker picker;
+        // A plain shell folder dialog, not Windows.Storage.Pickers.FolderPicker:
+        // that one is an application-identity API and the app is unpackaged.
         const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(windowId);
-        picker.as<::IInitializeWithWindow>()->Initialize(hwnd);
-        picker.FileTypeFilter().Append(L"*");
-        picker.SuggestedStartLocation(PickerLocationId::MusicLibrary);
-
-        auto folder = co_await picker.PickSingleFolderAsync();
-        if (folder == nullptr)
+        const std::wstring path = PickFolder(hwnd);
+        if (path.empty())
         {
             co_return 0;
         }
 
-        hstring token;
-        try
-        {
-            token = StorageApplicationPermissions::FutureAccessList().Add(folder);
-        }
-        catch (...)
-        {
-        }
-
-        const auto path = folder.Path();
-        std::string reference;
-        if (!path.empty())
-        {
-            reference = Utf8(std::wstring_view{ path.c_str(), path.size() });
-        }
-        else if (!token.empty())
-        {
-            reference = Utf8(std::wstring_view{ token.c_str(), token.size() });
-        }
-
         // Remember (and persist) the folder before scanning so that even a
         // crash mid-scan leaves enough state to recover on the next launch.
-        if (!reference.empty())
+        const std::string reference = Utf8(path);
         {
             const auto& folders = m_store.Data().scanFolders;
             if (std::find(folders.begin(), folders.end(), reference) == folders.end())
@@ -536,23 +551,13 @@ namespace wm::app
         }
         Save();
 
-        int scanned = 0;
-        const bool pathScan = !path.empty();
-        if (pathScan)
-        {
-            scanned = co_await ScanPathAsync(std::wstring{ path.c_str(), path.size() }, progress);
-        }
-        else
-        {
-            scanned = co_await ScanFolderAsync(folder);
-        }
+        // ApplyTrackBatch keeps the bound collection in step with each batch, so
+        // there is no rebuild - and no second persist - after the scan.
+        const int scanned = co_await ScanPathAsync(path, progress);
         co_await wm::app::ResumeOnUi();
-        if (!pathScan)
-        {
-            RefreshTracks();
-        }
-        RefreshPlaylists();
-        Save();
+        Diag("add-folder scanned=" + std::to_string(scanned));
+        Guarded("playlist counts", [&] { SyncPlaylistCounts(); });
+        Guarded("save", [&] { Save(); });
         co_return scanned;
     }
 
@@ -560,13 +565,13 @@ namespace wm::app
     {
         if (m_scanInProgress.exchange(true))
         {
+            Diag("rescan skipped: another scan is running");
             co_return 0;
         }
         ScanGuard guard(m_scanInProgress);
 
         int scanned = 0;
         int completed = 0;
-        bool needsRefresh = false;
         auto report = [&progress, &completed](int count) {
             if (progress)
             {
@@ -578,66 +583,38 @@ namespace wm::app
         {
             const std::wstring path = Utf16(folderReference);
             std::error_code pathError;
-            if (std::filesystem::is_directory(path, pathError) && !pathError)
+            if (!std::filesystem::is_directory(path, pathError) || pathError)
             {
-                try
-                {
-                    const int part = co_await ScanPathAsync(path, report);
-                    co_await wm::app::ResumeOnUi();
-                    scanned += part;
-                    completed += part;
-                }
-                catch (...)
-                {
-                }
+                // An unplugged drive, or a FutureAccessList token left over from
+                // the packaged build -- which has no meaning here: the store keys
+                // on absolute paths precisely so a reinstall cannot lose a list.
+                Diag("rescan skip: " + folderReference);
                 continue;
             }
 
-            StorageFolder folder = nullptr;
             try
             {
-                folder = co_await StorageFolder::GetFolderFromPathAsync(hstring{ Utf16(folderReference) });
+                const int part = co_await ScanPathAsync(path, report);
+                co_await wm::app::ResumeOnUi();
+                scanned += part;
+                completed += part;
             }
             catch (...)
             {
-            }
-
-            if (folder == nullptr)
-            {
-                try
-                {
-                    const auto access = StorageApplicationPermissions::FutureAccessList();
-                    folder = co_await access.GetFolderAsync(hstring{ Utf16(folderReference) });
-                }
-                catch (...)
-                {
-                }
-            }
-
-            if (folder != nullptr)
-            {
-                try
-                {
-                    const int part = co_await ScanFolderAsync(folder);
-                    co_await wm::app::ResumeOnUi();
-                    scanned += part;
-                    completed += part;
-                    needsRefresh = true;
-                }
-                catch (...)
-                {
-                }
             }
         }
 
         co_await wm::app::ResumeOnUi();
         const int removed = PruneMissing();
-        if (needsRefresh || removed > 0)
-        {
-            RefreshTracks();
-        }
-        RefreshPlaylists();
-        Save();
+        Diag("rescan scanned=" + std::to_string(scanned) + " removed=" + std::to_string(removed));
+        Guarded("track list", [&] {
+            if (removed > 0)
+            {
+                RefreshTracks();
+            }
+        });
+        Guarded("playlist counts", [&] { SyncPlaylistCounts(); });
+        Guarded("save", [&] { Save(); });
         co_return scanned;
     }
 
@@ -797,7 +774,7 @@ namespace wm::app
         item.IsBuiltIn(false);
         item.Glyph(kGlyphPlaylist);
         m_playlists.Append(item);
-        m_playlistIndex[Utf16(record.id)] = item;
+        m_playlistIndex.insert_or_assign(Utf16(record.id), item);
         Save();
         return item;
     }

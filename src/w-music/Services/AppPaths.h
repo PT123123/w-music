@@ -10,7 +10,8 @@
 
 namespace wm::app
 {
-    /// Where w-music keeps its data: %LOCALAPPDATA%\Packages\<pkg>\LocalState
+    /// Where w-music keeps its data: %LOCALAPPDATA%\w-music -- outside the build
+    /// folder on purpose, so deploying a new build cannot touch a library.
     std::filesystem::path DataDirectory();
     std::filesystem::path LibraryFilePath();
     std::filesystem::path SettingsFilePath();

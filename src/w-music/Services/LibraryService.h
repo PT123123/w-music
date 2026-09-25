@@ -76,10 +76,10 @@ namespace wm::app
     private:
         void RefreshTracks();
         void RefreshPlaylists();
+        void SyncPlaylistCounts();
         void ApplyTrackBatch(std::vector<wm::core::TrackRecord> batch,
                              int scanned,
                              std::function<void(int)> const& progress);
-        winrt::Windows::Foundation::IAsyncOperation<int> ScanFolderAsync(winrt::Windows::Storage::StorageFolder folder);
         winrt::Windows::Foundation::IAsyncOperation<int> ScanPathAsync(
             std::wstring const& path,
             std::function<void(int)> progress);

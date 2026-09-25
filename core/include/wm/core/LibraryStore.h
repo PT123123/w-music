@@ -41,7 +41,8 @@ struct LibraryData {
     int version = 1;
     std::vector<TrackRecord> tracks;
     std::vector<PlaylistRecord> playlists;
-    /// Folders chosen by the user (paths, or FutureAccessList tokens).
+    /// Folders the user chose, as absolute paths -- never a permission token, so
+    /// the store reads the same after a reinstall or a moved build folder.
     std::vector<std::string> scanFolders;
 };
 

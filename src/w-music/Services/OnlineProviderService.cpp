@@ -39,6 +39,19 @@ namespace wm::app
             return hstring{ Utf16(value) };
         }
 
+        /// A subfolder of the user data directory (%LOCALAPPDATA%\w-music),
+        /// created on demand. Not Windows.Storage.ApplicationData::Current():
+        /// that class resolves only for a packaged identity, and this app is
+        /// unpackaged -- so the download/cache paths used to die with
+        /// REGDB_E_CLASSNOTREG. User data has to outlive the build folder.
+        StorageFolder UserDataFolder(std::wstring_view name)
+        {
+            std::error_code ec;
+            const auto directory = DataDirectory() / std::filesystem::path{ name };
+            std::filesystem::create_directories(directory, ec);
+            return StorageFolder::GetFolderFromPathAsync(directory.wstring()).get();
+        }
+
         std::wstring EnvironmentValue(wchar_t const* name)
         {
             wchar_t buffer[4096]{};
@@ -481,8 +494,7 @@ namespace wm::app
                                              : std::wstring{ item.Id().c_str() });
                 const std::wstring fileName = key + ExtensionOfUrl(url);
 
-                auto folder = ApplicationData::Current().LocalFolder()
-                                  .CreateFolderAsync(L"PreviewCache", CreationCollisionOption::OpenIfExists).get();
+                auto folder = UserDataFolder(L"PreviewCache");
 
                 auto file = folder.TryGetItemAsync(fileName).get().try_as<StorageFile>();
                 if (file == nullptr)
@@ -573,8 +585,7 @@ namespace wm::app
         {
             const std::wstring fileName = SanitizeFileName(Utf16(Narrow(item.Title()))) + ExtensionOfUrl(url);
 
-            auto folder = ApplicationData::Current().LocalFolder()
-                              .CreateFolderAsync(L"Downloads", CreationCollisionOption::OpenIfExists).get();
+            auto folder = UserDataFolder(L"Downloads");
             auto file = folder.CreateFileAsync(hstring{ fileName }, CreationCollisionOption::ReplaceExisting).get();
             if (!DownloadTo(file, url, adapter))
             {
@@ -647,8 +658,7 @@ namespace wm::app
     {
         try
         {
-            auto folder = ApplicationData::Current().LocalFolder()
-                              .CreateFolderAsync(L"Downloads", CreationCollisionOption::OpenIfExists).get();
+            auto folder = UserDataFolder(L"Downloads");
             return std::wstring{ folder.Path().c_str() };
         }
         catch (...)

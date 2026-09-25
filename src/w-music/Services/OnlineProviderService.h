@@ -101,7 +101,7 @@ namespace wm::app
         wm::core::FetchFn Transport() const;
 
         /// The download target directory (created on demand):
-        /// <LocalState>\Downloads.
+        /// %LOCALAPPDATA%\w-music\Downloads.
         std::wstring DownloadsDirectory() const;
 
         /// Streams |url| to |filePath| with |headers| (e.g. the browser-ish

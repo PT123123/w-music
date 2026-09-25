@@ -21,12 +21,36 @@ namespace
         return buf;
     }
 
-    // True for the known wrong-thread RPC error when the library actually
-    // grew: the scan/import completed, only a final XAML touch failed.
-    bool IsWrongThreadAfterSuccess(winrt::hresult hr, uint32_t tracksBefore)
+    // A scan writes into %LOCALAPPDATA%\w-music\library.json as it goes, so a
+    // bigger library means the songs landed and only a later step broke. The
+    // status line then has to say what actually happened -- not "import failed".
+    bool LibraryGrew(uint32_t tracksBefore, int& added)
     {
-        return static_cast<int32_t>(hr) == RPC_E_WRONG_THREAD &&
-               wm::app::Library().Tracks().Size() > tracksBefore;
+        const uint32_t now = wm::app::Library().Tracks().Size();
+        added = static_cast<int>(now - tracksBefore);
+        return now > tracksBefore;
+    }
+
+    /// Telling XAML about a change is the *last* thing a data change does, and
+    /// these coroutines are started fire-and-forget (MainWindow::OnLoaded does
+    /// not await InitializeAsync) -- an exception escaping from here unwinds the
+    /// coroutine into a discarded async action and leaves no trace at all. So it
+    /// is named in diag.log instead, and the library stays as scanned.
+    template <typename Fn>
+    void NotifyUi(char const* what, Fn&& fn)
+    {
+        try
+        {
+            fn();
+        }
+        catch (hresult_error const& exception)
+        {
+            wm::app::Diag(std::string{ "ui notify " } + what + " hr=" + FormatHr(exception.code()));
+        }
+        catch (...)
+        {
+            wm::app::Diag(std::string{ "ui notify " } + what + " failed");
+        }
     }
 }
 
@@ -57,7 +81,9 @@ namespace winrt::w_music::implementation
             });
             return;
         }
-        m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
+        NotifyUi("PropertyChanged", [&] {
+            m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{ hstring{ name } });
+        });
     }
 
     winrt::event_token LibraryViewModel::PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
@@ -74,11 +100,16 @@ namespace winrt::w_music::implementation
     void LibraryViewModel::Fill(IObservableVector<winrt::w_music::TrackItem> const& target,
                                std::vector<winrt::w_music::TrackItem> const& source)
     {
-        target.Clear();
-        for (auto const& item : source)
-        {
-            target.Append(item);
-        }
+        // Clear()/Append() run the XAML binder synchronously (item containers are
+        // realized or dropped right here), which is exactly the step that must not
+        // be able to unwind a scan.
+        NotifyUi("Fill", [&] {
+            target.Clear();
+            for (auto const& item : source)
+            {
+                target.Append(item);
+            }
+        });
     }
 
     void LibraryViewModel::RefreshDiscover()
@@ -118,6 +149,7 @@ namespace winrt::w_music::implementation
         const auto tracksBefore = library.Tracks().Size();
         int scanned = 0;
         std::wstring error;
+        std::wstring note;
         try
         {
             auto lifetime = get_strong();
@@ -128,29 +160,40 @@ namespace winrt::w_music::implementation
         }
         catch (hresult_error const& exception)
         {
+            const std::wstring reason{ exception.message().c_str() };
             wm::app::Diag(std::string{ "Init catch hr=" } + FormatHr(exception.code()) +
-                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
-            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+                          " msg=" + wm::app::Utf8(reason));
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
             {
-                wm::app::Diag("Init: wrong-thread error after successful scan, reporting success");
-                scanned = static_cast<int>(library.Tracks().Size() - tracksBefore);
+                scanned = added;
+                note = L"（收尾步骤出错：" + reason + L"，已记入 diag.log）";
             }
             else
             {
-                error = L"扫描失败：" + std::wstring{ exception.message().c_str() };
+                error = L"扫描失败：" + reason;
             }
         }
         catch (...)
         {
             wm::app::Diag("Init catch(...)");
-            error = L"扫描失败，请重新添加文件夹。";
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
+            {
+                scanned = added;
+                note = L"（收尾步骤出错，已记入 diag.log）";
+            }
+            else
+            {
+                error = L"扫描失败，请重新添加文件夹。";
+            }
         }
 
         co_await wm::app::ResumeOnUi();
         if (error.empty())
         {
             RefreshDiscover();
-            SetStatus(hstring{ L"曲库共 " + std::to_wstring(static_cast<int>(m_tracks.Size())) + L" 首，本次处理 " + std::to_wstring(scanned) + L" 个文件" });
+            SetStatus(hstring{ L"曲库共 " + std::to_wstring(static_cast<int>(m_tracks.Size())) + L" 首，本次处理 " + std::to_wstring(scanned) + L" 个文件" + note });
         }
         else
         {
@@ -173,6 +216,7 @@ namespace winrt::w_music::implementation
         const auto tracksBefore = wm::app::Library().Tracks().Size();
         int scanned = 0;
         std::wstring error;
+        std::wstring note;
         try
         {
             auto lifetime = get_strong();
@@ -186,29 +230,40 @@ namespace winrt::w_music::implementation
         }
         catch (hresult_error const& exception)
         {
+            const std::wstring reason{ exception.message().c_str() };
             wm::app::Diag(std::string{ "AddFolder catch hr=" } + FormatHr(exception.code()) +
-                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
-            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+                          " msg=" + wm::app::Utf8(reason));
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
             {
-                wm::app::Diag("AddFolder: wrong-thread error after successful import, reporting success");
-                scanned = static_cast<int>(wm::app::Library().Tracks().Size() - tracksBefore);
+                scanned = added;
+                note = L"（收尾步骤出错：" + reason + L"，已记入 diag.log）";
             }
             else
             {
-                error = L"导入失败：" + std::wstring{ exception.message().c_str() };
+                error = L"导入失败：" + reason;
             }
         }
         catch (...)
         {
             wm::app::Diag("AddFolder catch(...)");
-            error = L"导入失败，请重新选择文件夹。";
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
+            {
+                scanned = added;
+                note = L"（收尾步骤出错，已记入 diag.log）";
+            }
+            else
+            {
+                error = L"导入失败，请重新选择文件夹。";
+            }
         }
 
         co_await wm::app::ResumeOnUi();
         if (error.empty())
         {
             RefreshDiscover();
-            SetStatus(hstring{ L"新增 " + std::to_wstring(scanned) + L" 首歌曲，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
+            SetStatus(hstring{ L"新增 " + std::to_wstring(scanned) + L" 首歌曲，曲库共 " + std::to_wstring(m_trackCount) + L" 首" + note });
         }
         else
         {
@@ -231,6 +286,7 @@ namespace winrt::w_music::implementation
         const auto tracksBefore = wm::app::Library().Tracks().Size();
         int scanned = 0;
         std::wstring error;
+        std::wstring note;
         try
         {
             auto lifetime = get_strong();
@@ -241,29 +297,40 @@ namespace winrt::w_music::implementation
         }
         catch (hresult_error const& exception)
         {
+            const std::wstring reason{ exception.message().c_str() };
             wm::app::Diag(std::string{ "Rescan catch hr=" } + FormatHr(exception.code()) +
-                          " msg=" + wm::app::Utf8(std::wstring{ exception.message().c_str() }));
-            if (IsWrongThreadAfterSuccess(exception.code(), tracksBefore))
+                          " msg=" + wm::app::Utf8(reason));
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
             {
-                wm::app::Diag("Rescan: wrong-thread error after successful scan, reporting success");
-                scanned = static_cast<int>(wm::app::Library().Tracks().Size() - tracksBefore);
+                scanned = added;
+                note = L"（收尾步骤出错：" + reason + L"，已记入 diag.log）";
             }
             else
             {
-                error = L"扫描失败：" + std::wstring{ exception.message().c_str() };
+                error = L"扫描失败：" + reason;
             }
         }
         catch (...)
         {
             wm::app::Diag("Rescan catch(...)");
-            error = L"扫描失败，请重新添加文件夹。";
+            int added = 0;
+            if (LibraryGrew(tracksBefore, added))
+            {
+                scanned = added;
+                note = L"（收尾步骤出错，已记入 diag.log）";
+            }
+            else
+            {
+                error = L"扫描失败，请重新添加文件夹。";
+            }
         }
 
         co_await wm::app::ResumeOnUi();
         if (error.empty())
         {
             RefreshDiscover();
-            SetStatus(hstring{ L"扫描完成，处理 " + std::to_wstring(scanned) + L" 个文件，曲库共 " + std::to_wstring(m_trackCount) + L" 首" });
+            SetStatus(hstring{ L"扫描完成，处理 " + std::to_wstring(scanned) + L" 个文件，曲库共 " + std::to_wstring(m_trackCount) + L" 首" + note });
         }
         else
         {
