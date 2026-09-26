@@ -32,9 +32,22 @@ public:
     /// Advance. |autoAdvance| is false when the user explicitly pressed next
     /// (RepeatOne is then skipped).
     std::optional<std::string> Next(bool autoAdvance);
+    /// What Next(|autoAdvance|) would return right now, without moving.
+    /// Shuffle is the one mode that cannot answer without consuming its
+    /// shuffled order, so it peeks nothing and the caller presents that
+    /// honestly ("随机播放不预告下一首").
+    std::optional<std::string> PeekNext(bool autoAdvance) const;
     std::optional<std::string> Previous();
     std::optional<std::string> JumpTo(std::size_t index);
     std::optional<std::string> JumpToId(const std::string& id);
+
+    /// Adds ids at the tail (radio flow keeps extending the queue). The
+    /// current index is untouched; a stale shuffle order is rebuilt lazily.
+    void Append(std::vector<std::string> ids);
+    /// Drops every occurrence of |id|. When the current track itself goes,
+    /// the index lands on whatever follows it (the previous one at the tail).
+    /// Returns true when something was removed.
+    bool RemoveAll(const std::string& id);
 
     const std::vector<std::string>& Ids() const noexcept { return ids_; }
 

@@ -5,6 +5,7 @@
 
 #include "Services/AppPaths.h"
 #include "Services/LibraryService.h"
+#include "Services/RecommendService.h"
 #include "Services/Services.h"
 #include "ViewModels/PlayerViewModel.h"
 
@@ -29,6 +30,15 @@ namespace
         const uint32_t now = wm::app::Library().Tracks().Size();
         added = static_cast<int>(now - tracksBefore);
         return now > tracksBefore;
+    }
+
+    /// 曲库（重新）加载后同步给推荐侧：缓存按曲库规模做指纹，规模一变
+    /// 旧答案就不该再被端上来；推荐流的离线种子也由此重新可用。
+    void NotifyRecommendLibrarySize()
+    {
+        wm::app::Recommend().SetLibrarySize(
+            static_cast<int32_t>(wm::app::Library().Tracks().Size()));
+        wm::app::Player().NotifyLibraryReady();
     }
 
     /// Telling XAML about a change is the *last* thing a data change does, and
@@ -135,6 +145,8 @@ namespace winrt::w_music::implementation
         RaisePropertyChanged(L"Playlists");
 
         RefreshDiscover();
+        // 曲库规模就位：推荐缓存按它做指纹，推荐流的离线种子此刻才可用。
+        NotifyRecommendLibrarySize();
 
         if (library.FolderCount() == 0)
         {
@@ -201,6 +213,7 @@ namespace winrt::w_music::implementation
         }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
+        NotifyRecommendLibrarySize();
     }
 
     IAsyncAction LibraryViewModel::AddFolderAsync()
@@ -271,6 +284,7 @@ namespace winrt::w_music::implementation
         }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
+        NotifyRecommendLibrarySize();
     }
 
     IAsyncAction LibraryViewModel::RescanAsync()
@@ -338,6 +352,7 @@ namespace winrt::w_music::implementation
         }
         m_isScanning = false;
         RaisePropertyChanged(L"IsScanning");
+        NotifyRecommendLibrarySize();
     }
 
     void LibraryViewModel::CreatePlaylist(hstring const& name)

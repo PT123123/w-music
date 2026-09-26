@@ -16,11 +16,17 @@
 
         <!-- ===== 左：封面、频谱、进度、控制 ===== -->
         <StackPanel Grid.Column="0" Padding="48,32,32,28" Spacing="16">
-            <Border Width="260" Height="260"
+            <!-- 封面区是电台手势的落点：左右滑 = 点赞/差评（不打断播放），
+                 长按 = 差评。拖动有橡皮筋限幅，松手回弹。 -->
+            <Border x:Name="Cover" Width="260" Height="260"
                     CornerRadius="18"
                     Background="{ThemeResource WmCardBrush}"
                     BorderBrush="{ThemeResource WmBorderBrush}"
-                    BorderThickness="1">
+                    BorderThickness="1"
+                    ManipulationMode="TranslateX">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="CoverShift" />
+                </Border.RenderTransform>
                 <FontIcon Glyph="&#xEC4F;" FontSize="84" Foreground="{ThemeResource WmAccentBrush}"
                           HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
@@ -66,17 +72,24 @@
                         Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="下一曲">
                     <FontIcon Glyph="&#xE893;" FontSize="16" />
                 </Button>
-                <Button x:Name="ModeBtn" Content="{x:Bind Player.ModeText, Mode=OneWay}" Padding="12,6" CornerRadius="14" />
+                <Button x:Name="ModeBtn" Content="{x:Bind Player.ModeText, Mode=OneWay}" Padding="12,6" CornerRadius="14"
+                        ToolTipService.ToolTip="播放模式：推荐流（默认，按口味和时间窗）→ 顺序 → 列表循环 → 随机 → 单曲循环" />
                 <Button x:Name="FavBtn" Width="42" Height="42" CornerRadius="21" Padding="0"
                         Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="喜欢">
                     <FontIcon Glyph="&#xEB51;" FontSize="17" />
                 </Button>
             </StackPanel>
+
+            <TextBlock FontSize="11" Opacity="0.45" HorizontalAlignment="Center"
+                       Margin="0,-6,0,0" TextWrapping="Wrap" HorizontalTextAlignment="Center">
+                左滑封面 = 差评换一首，右滑 = 点赞加权；长按封面 = 差评。
+            </TextBlock>
         </StackPanel>
 
-        <!-- ===== 右：歌词 ===== -->
+        <!-- ===== 右：推荐流「接下来」卡片 + 歌词 ===== -->
         <Grid Grid.Column="1" Padding="28,32,40,28" BorderBrush="{ThemeResource WmBorderBrush}" BorderThickness="1,0,0,0">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
@@ -97,8 +110,82 @@
                 </StackPanel>
             </Grid>
 
+            <!-- 推荐流「接下来」：预取缓冲的预告（可点播/可换）+ 诚实的状态说明。
+                 推荐流模式下下一曲从缓冲出队（零等待）；顺序模式下预告队列的
+                 下一首；随机模式明确说"不预告"。 -->
+            <Border Grid.Row="1"
+                    x:Name="FlowCard"
+                    Margin="0,12,0,0"
+                    Padding="14,10,14,10"
+                    CornerRadius="12"
+                    Background="{ThemeResource WmCardBrush}"
+                    BorderBrush="{ThemeResource WmBorderBrush}"
+                    BorderThickness="1">
+                <StackPanel Spacing="6">
+                    <Grid>
+                        <TextBlock Text="{x:Bind Player.FlowHeaderText, Mode=OneWay}"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button x:Name="FlowRefreshBtn"
+                                Content="换一个"
+                                FontSize="12"
+                                Padding="10,4"
+                                CornerRadius="10"
+                                HorizontalAlignment="Right"
+                                Visibility="{x:Bind Player.FlowRefreshVisibility, Mode=OneWay}"
+                                ToolTipService.ToolTip="跳过这首预告，推荐流会补一首新的" />
+                    </Grid>
+
+                    <ListView x:Name="FlowUpNextList"
+                              ItemsSource="{x:Bind Player.FlowUpNext, Mode=OneWay}"
+                              MaxHeight="128"
+                              SelectionMode="None"
+                              IsItemClickEnabled="True">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:RecommendItem">
+                                <Grid Padding="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="0">
+                                        <TextBlock Text="{x:Bind Title}"
+                                                   FontSize="13"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Artist}"
+                                                   FontSize="11"
+                                                   Opacity="0.55"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="{x:Bind HasArtist}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
+                                        <TextBlock Text="{x:Bind ScoreText}"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource WmAccentBrush}"
+                                                   HorizontalAlignment="Right" />
+                                        <TextBlock Text="{x:Bind Reasons}"
+                                                   FontSize="10"
+                                                   Opacity="0.5"
+                                                   MaxLines="1"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   HorizontalAlignment="Right"
+                                                   Visibility="{x:Bind ReasonsVisibility}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <TextBlock Text="{x:Bind Player.FlowStreamText, Mode=OneWay}"
+                               FontSize="11"
+                               Opacity="0.55"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
             <ListView x:Name="LyricList"
-                      Grid.Row="1"
+                      Grid.Row="2"
                       Margin="0,12,0,0"
                       ItemsSource="{x:Bind Player.Lyrics, Mode=OneWay}"
                       SelectionMode="None"
@@ -114,13 +201,23 @@
                 </ListView.ItemTemplate>
             </ListView>
 
-            <TextBlock Grid.Row="2"
+            <TextBlock Grid.Row="3"
                        Margin="0,10,0,0"
                        FontSize="11.5"
                        Opacity="0.55"
                        TextWrapping="Wrap">
-                点击任意一行即可跳转到该时间点。没有歌词时，把与音乐文件同名的 .lrc 放在同一目录（或 lyrics 子目录）即可自动加载；用 ±0.5s 可微调整体偏移。
+                点击任意一行即可跳转到该时间点。没有歌词时，把与音乐文件同名的 .lrc 放在同一目录（或 lyrics 子目录）即可自动加载；用 ±0.5s 可微调整整体偏移。
             </TextBlock>
         </Grid>
+
+        <!-- 电台 / 手势的轻提示：不打断播放，几秒后自动消失 -->
+        <TextBlock x:Name="FlowToast"
+                   Grid.Column="0" Grid.ColumnSpan="2"
+                   HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                   Margin="0,0,0,18"
+                   FontSize="13"
+                   Opacity="0"
+                   IsHitTestVisible="False"
+                   Text="{x:Bind Player.FlowStatusText, Mode=OneWay}" />
     </Grid>
 </Page>

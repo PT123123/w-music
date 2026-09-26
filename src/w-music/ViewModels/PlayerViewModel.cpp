@@ -5,13 +5,18 @@
 
 #include "Audio/EqualizedSource.h"
 #include "Models/LyricLineItem.h"
+#include "Models/RecommendItem.h"
+#include "Models/TrackItem.h"
 #include "Services/AppPaths.h"
 #include "Services/DiscoverSettings.h"
 #include "Services/LibraryService.h"
 #include "Services/OnlineProviderService.h"
+#include "Services/RecommendService.h"
 #include "Services/Services.h"
 
 #include <wm/core/OnlineSources.h>
+
+#include <ctime>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -36,6 +41,11 @@ namespace winrt::w_music::implementation
             }
         }
 
+        bool IsRemotePath(std::wstring_view path)
+        {
+            return path.rfind(L"http://", 0) == 0 || path.rfind(L"https://", 0) == 0;
+        }
+
         winrt::Windows::Foundation::TimeSpan ToTimeSpan(double seconds)
         {
             return std::chrono::duration_cast<winrt::Windows::Foundation::TimeSpan>(
@@ -50,6 +60,18 @@ namespace winrt::w_music::implementation
         std::string IdOf(hstring const& value)
         {
             return wm::app::Utf8(std::wstring_view{ value.c_str(), value.size() });
+        }
+
+        /// 引擎推荐行 -> 可播放的 TrackItem（"rec:" 前缀 id，不在曲库索引里）。
+        winrt::w_music::TrackItem MakeFlowTrack(winrt::w_music::RecommendItem const& row)
+        {
+            auto track = winrt::make<winrt::w_music::implementation::TrackItem>();
+            track.Id(hstring{ L"rec:" } + row.TrackId());
+            track.Title(row.Title());
+            track.Artist(row.Artist());
+            track.Album(row.Album());
+            track.FilePath(row.FilePath());
+            return track;
         }
 
         bool StartsWith(std::string const& text, char const* prefix)
@@ -78,6 +100,8 @@ namespace winrt::w_music::implementation
     PlayerViewModel::PlayerViewModel()
     {
         m_lyrics = winrt::single_threaded_observable_vector<winrt::w_music::LyricLineItem>();
+        m_flowUpNext = winrt::single_threaded_observable_vector<winrt::w_music::RecommendItem>();
+        m_flowWindow = FlowWindowLabel();
 
         wm::core::SpectrumConfig config;
         config.fftSize = 2048;
@@ -203,15 +227,13 @@ namespace winrt::w_music::implementation
         wm::app::Diag("media ended");
         try
         {
-            const auto next = m_queue.Next(true);
-            if (next.has_value())
+            if (m_mode == winrt::w_music::PlayMode::Radio)
             {
-                PlayTrackById(hstring{ wm::app::Utf16(*next) });
+                // 推荐流自然续播：同一套出队路径（缓冲空时内部降级为队列）。
+                FlowNext(true);
                 return;
             }
-
-            m_isPlaying = false;
-            RaisePropertyChanged(L"IsPlaying");
+            FallbackQueueNext(true);
         }
         catch (...)
         {
@@ -258,13 +280,30 @@ namespace winrt::w_music::implementation
         }
     }
 
-    void PlayerViewModel::Next()
+    void PlayerViewModel::FallbackQueueNext(bool autoAdvance)
     {
-        const auto next = m_queue.Next(false);
+        const auto next = m_queue.Next(autoAdvance);
         if (next.has_value())
         {
             PlayTrackById(hstring{ wm::app::Utf16(*next) });
+            return;
         }
+        if (autoAdvance)
+        {
+            m_isPlaying = false;
+            RaisePropertyChanged(L"IsPlaying");
+        }
+    }
+
+    void PlayerViewModel::Next()
+    {
+        if (m_mode == winrt::w_music::PlayMode::Radio)
+        {
+            // 推荐流：下一曲就是从预取缓冲里出队（同步、零等待）。
+            FlowNext(false);
+            return;
+        }
+        FallbackQueueNext(false);
     }
 
     void PlayerViewModel::Previous()
@@ -274,6 +313,537 @@ namespace winrt::w_music::implementation
         {
             PlayTrackById(hstring{ wm::app::Utf16(*previous) });
         }
+    }
+
+    // ------------------------------------------------------------------ flow
+    // 推荐流（抖音式）与旧电台的本质区别：「问引擎」不在切歌路径上。
+    // 切歌 = 预取缓冲同步出队，零等待；引擎的全部工作（/v1/feed/next、
+    // 冷启动、特征提取）都在后台补货协程里完成，且磁盘缓存里的上一份
+    // feed 先行垫底 —— 缓冲空时才降级为顺序队列，并诚实标注。
+
+    hstring PlayerViewModel::FlowWindowLabel()
+    {
+        std::time_t now = std::time(nullptr);
+        std::tm local{};
+        localtime_s(&local, &now);
+        const int hour = local.tm_hour;
+        if (hour >= 5 && hour < 8) return hstring{ L"清晨" };
+        if (hour >= 8 && hour < 11) return hstring{ L"上午" };
+        if (hour >= 11 && hour < 14) return hstring{ L"午间" };
+        if (hour >= 14 && hour < 18) return hstring{ L"下午" };
+        if (hour >= 18 && hour < 21) return hstring{ L"傍晚" };
+        if (hour >= 21) return hstring{ L"夜晚" };
+        return hstring{ L"深夜" }; // 0-5 点
+    }
+
+    void PlayerViewModel::SyncFlowWindow()
+    {
+        const hstring window = FlowWindowLabel();
+        if (window == m_flowWindow)
+        {
+            return;
+        }
+        m_flowWindow = window;
+        // 新窗口要一条新流；旧窗口的余量撑到新流就绪（绝不空窗）。
+        m_flowReplacePending = true;
+        ShowFlowStatus(hstring{ L"已进入「" + window + L"」时间窗，推荐流正在重新生成" });
+    }
+
+    void PlayerViewModel::FlowNext(bool autoAdvance)
+    {
+        // 出队/入队/PlayTrack 全是 UI 亲和操作：万一有后台路径走进来，
+        // 取证 + 重新投递，不裸跑（与 RefreshFlowUi 同一套护栏）。
+        if (!wm::app::UiThread())
+        {
+            wm::app::Diag("PV flow next OFF-THREAD");
+            wm::app::PostToUi([weak = get_weak(), autoAdvance] {
+                if (auto self = weak.get())
+                {
+                    self->FlowNext(autoAdvance);
+                }
+            });
+            return;
+        }
+        SyncFlowWindow();
+
+        if (!m_flowBuffer.empty())
+        {
+            auto const row = m_flowBuffer.front();
+            m_flowBuffer.pop_front();
+
+            // 追加进队列再播：上一曲/下一曲按键在推荐流里也能自然回退/前进。
+            auto track = MakeFlowTrack(row);
+            m_queue.Append({ IdOf(track.Id()) });
+            wm::app::Diag("flow -> buffered next: " + IdOf(track.Id()));
+            PlayTrack(track);
+            // 播放事件喂给引擎的口味画像（时间衰减权重用它）。
+            wm::app::Recommend().SendFeedbackAsync(row.TrackId(), hstring{ L"play" });
+            RefreshFlowUi();
+            EnsureFlowBufferAsync(false);
+            return;
+        }
+
+        // 缓冲空（冷启动 / 曲库太小 / 引擎没就绪）：顺序顶上，绝不阻塞。
+        wm::app::Diag("flow -> buffer empty, queue fallback");
+        ShowFlowStatus(hstring{ L"推荐流还没就绪，先按顺序播放" });
+        FallbackQueueNext(autoAdvance);
+        RefreshFlowUi();
+        EnsureFlowBufferAsync(false);
+    }
+
+    void PlayerViewModel::RememberRejectedPath(std::string path)
+    {
+        if (path.empty())
+        {
+            return;
+        }
+        m_rejectedPaths.push_back(std::move(path));
+        while (m_rejectedPaths.size() > kRejectedMax)
+        {
+            m_rejectedPaths.pop_front();
+        }
+    }
+
+    bool PlayerViewModel::MergeFlowRows(
+        winrt::Windows::Foundation::Collections::IVectorView<winrt::w_music::RecommendItem> const& rows,
+        bool replace)
+    {
+        if (rows == nullptr || rows.Size() == 0)
+        {
+            return false; // replace 失败时保留旧余量：绝不空窗
+        }
+
+        std::wstring currentPath;
+        if (m_currentTrack != nullptr && !IsRemotePath(std::wstring_view{ m_currentTrack.FilePath().c_str() }))
+        {
+            currentPath.assign(m_currentTrack.FilePath().c_str(), m_currentTrack.FilePath().size());
+        }
+
+        auto const seen = [this](std::wstring const& path) {
+            std::string const utf8 = wm::app::Utf8(path);
+            if (std::find(m_recentPaths.begin(), m_recentPaths.end(), utf8) != m_recentPaths.end())
+            {
+                return true;
+            }
+            return std::find(m_rejectedPaths.begin(), m_rejectedPaths.end(), utf8) != m_rejectedPaths.end();
+        };
+
+        std::vector<winrt::w_music::RecommendItem> fresh;
+        fresh.reserve(rows.Size());
+        for (std::uint32_t i = 0; i < rows.Size() && fresh.size() < kFlowBufferMax; ++i)
+        {
+            auto row = rows.GetAt(i);
+            if (row == nullptr || row.FilePath().empty())
+            {
+                continue;
+            }
+            std::wstring const path{ row.FilePath().c_str() };
+            if (!currentPath.empty() && path == currentPath)
+            {
+                continue; // 正在播的这首不进预告
+            }
+            if (seen(path))
+            {
+                continue; // 最近听过的 / 本会话跳过或差评过的
+            }
+            bool dup = false;
+            for (auto const& existing : fresh)
+            {
+                if (std::wstring{ existing.FilePath().c_str() } == path)
+                {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup && !replace)
+            {
+                for (auto const& existing : m_flowBuffer)
+                {
+                    if (std::wstring{ existing.FilePath().c_str() } == path)
+                    {
+                        dup = true;
+                        break;
+                    }
+                }
+            }
+            if (dup)
+            {
+                continue;
+            }
+            fresh.push_back(row);
+        }
+
+        if (fresh.empty())
+        {
+            return false;
+        }
+        if (replace)
+        {
+            m_flowBuffer.assign(fresh.begin(), fresh.end());
+        }
+        else
+        {
+            m_flowBuffer.insert(m_flowBuffer.end(), fresh.begin(), fresh.end());
+            while (m_flowBuffer.size() > kFlowBufferMax)
+            {
+                m_flowBuffer.pop_back();
+            }
+        }
+        return true;
+    }
+
+    winrt::fire_and_forget PlayerViewModel::EnsureFlowBufferAsync(bool replace)
+    {
+        auto lifetime = get_strong();
+        // 整个补货体只碰 UI 亲和状态（缓冲/卡片/缓冲互斥量）：先把线程归一
+        // 到 UI，后续全部段落无需再各自担心调用方从哪来。
+        co_await ResumeToUi{ m_dispatcher };
+        if (replace)
+        {
+            m_flowReplacePending = true;
+        }
+        if (m_flowRefillBusy)
+        {
+            co_return; // 已有一轮在途：结束后会按需续跑
+        }
+        if (!m_flowReplacePending && m_flowBuffer.size() >= kFlowBufferTarget)
+        {
+            co_return; // 够用就不动：缓冲是「下一首」，不是整个曲库
+        }
+        m_flowRefillBusy = true;
+
+        // 离线种子：磁盘缓存里的上一份 feed（曲库指纹一致才可用）。引擎
+        // 冷启动要几秒到几分钟，这段时间「下一曲」也必须有货 —— 这一步
+        // 纯读内存里的缓存文件，不同步任何网络。
+        if (!m_flowCacheSeeded)
+        {
+            m_flowCacheSeeded = true;
+            auto cached = wm::app::Recommend().CachedRows(
+                wm::app::RecommendService::Answer::Feed, hstring{},
+                static_cast<int32_t>(kFlowCandidates));
+            MergeFlowRows(cached, false);
+            RefreshFlowUi();
+        }
+
+        auto& engine = wm::app::Recommend();
+        if (!engine.IsReady() || engine.CurrentStage() != wm::app::RecommendService::Stage::Ready)
+        {
+            // 从没预热过（没用过个性推荐页却直接听推荐流的人）就兜底 kick
+            // 一次：纯后台启动，这里绝不等待。
+            if (!m_flowPrewarmKicked)
+            {
+                m_flowPrewarmKicked = true;
+                wm::app::Diag("flow -> kick engine prewarm");
+                engine.PrewarmAsync();
+            }
+            m_flowRefillBusy = false;
+            RefreshFlowUi(); // 说明文案反映「预热中」
+            co_return;
+        }
+
+        // 排除列表：缓冲里已有的引擎曲目，避免引擎反复端上同一批。
+        std::vector<hstring> excludes;
+        excludes.reserve(m_flowBuffer.size());
+        for (auto const& row : m_flowBuffer)
+        {
+            if (!row.TrackId().empty())
+            {
+                excludes.push_back(row.TrackId());
+            }
+        }
+
+        const hstring windowAtRequest = m_flowWindow;
+        IVectorView<winrt::w_music::RecommendItem> rows{ nullptr };
+        try
+        {
+            rows = co_await engine.GetFeedAsync(static_cast<int32_t>(kFlowCandidates), std::move(excludes));
+        }
+        catch (...)
+        {
+            rows = nullptr;
+        }
+        co_await ResumeToUi{ m_dispatcher };
+        m_flowRefillBusy = false;
+
+        // 在途期间跨了时间窗：这份是旧窗口的答案。已挂整流重算就丢弃，
+        // 立刻按新窗口重取；否则照样并入（推荐仍是可用的）。
+        bool changed = false;
+        if (windowAtRequest == m_flowWindow)
+        {
+            const bool replaceNow = m_flowReplacePending;
+            m_flowReplacePending = false;
+            changed = MergeFlowRows(rows, replaceNow);
+        }
+        RefreshFlowUi();
+
+        // 变化过但还不够填（被最近播放过滤掉太多）就接着补；没变化说明
+        // 引擎端上来的都被过滤了，再问也是同一批，停住等下一次切歌。
+        if (changed && (m_flowReplacePending || m_flowBuffer.size() < kFlowBufferTarget))
+        {
+            EnsureFlowBufferAsync(false);
+        }
+    }
+
+    void PlayerViewModel::PlayFlowUpNext(int32_t index)
+    {
+        if (!IsFlowMode() || index < 0 || static_cast<std::size_t>(index) >= m_flowBuffer.size())
+        {
+            return;
+        }
+        auto const row = m_flowBuffer[static_cast<std::size_t>(index)];
+        // 点播第 index 行：它前面的预告一并出队（用户明确不听）。
+        m_flowBuffer.erase(m_flowBuffer.begin(), m_flowBuffer.begin() + index + 1);
+
+        auto track = MakeFlowTrack(row);
+        m_queue.Append({ IdOf(track.Id()) });
+        PlayTrack(track);
+        wm::app::Recommend().SendFeedbackAsync(row.TrackId(), hstring{ L"play" });
+        RefreshFlowUi();
+        EnsureFlowBufferAsync(false);
+    }
+
+    void PlayerViewModel::SkipFlowSlot()
+    {
+        if (!IsFlowMode())
+        {
+            return;
+        }
+        if (!m_flowBuffer.empty())
+        {
+            RememberRejectedPath(wm::app::Utf8(m_flowBuffer.front().FilePath()));
+            m_flowBuffer.pop_front();
+            ShowFlowStatus(hstring{ L"已跳过这首预告，换下一首" });
+        }
+        RefreshFlowUi();
+        EnsureFlowBufferAsync(false);
+    }
+
+    void PlayerViewModel::NotifyLibraryReady()
+    {
+        // 曲库（重新）加载 = 缓存指纹可能换了：离线种子值得重试一次。
+        m_flowCacheSeeded = false;
+        EnsureFlowBufferAsync(false);
+    }
+
+    bool PlayerViewModel::IsFlowMode() const noexcept
+    {
+        return m_mode == winrt::w_music::PlayMode::Radio;
+    }
+
+    winrt::Microsoft::UI::Xaml::Visibility PlayerViewModel::FlowRefreshVisibility() const noexcept
+    {
+        return IsFlowMode() ? winrt::Microsoft::UI::Xaml::Visibility::Visible
+                            : winrt::Microsoft::UI::Xaml::Visibility::Collapsed;
+    }
+
+    void PlayerViewModel::RefreshFlowUi()
+    {
+        // 「接下来」卡片动的是非 agile 的 observable vector（线程亲和）：
+        // 任何路径漏回 UI 线程都会 8001010e → 0xC000027B（0.1.21/0.1.24 各崩过
+        // 一次）。这里统一设卡：不在 UI 线程就取证并重新投递，绝不再裸跑。
+        if (!wm::app::UiThread())
+        {
+            wm::app::Diag("PV flow ui OFF-THREAD");
+            wm::app::PostToUi([weak = get_weak()] {
+                if (auto self = weak.get())
+                {
+                    self->RefreshFlowUi();
+                }
+            });
+            return;
+        }
+
+        if (m_flowUpNext == nullptr)
+        {
+            m_flowUpNext = winrt::single_threaded_observable_vector<winrt::w_music::RecommendItem>();
+        }
+
+        const bool flow = IsFlowMode();
+        m_flowHeaderText = flow
+            ? hstring{ L"接下来 · 推荐流（" + m_flowWindow + L"）" }
+            : hstring{ L"接下来 · " + ModeText() };
+
+        // 就地重建行列表：observable vector 的 VectorChanged 自己驱动
+        // ListView，整卡不重绑。
+        m_flowUpNext.Clear();
+        if (flow)
+        {
+            const std::size_t shown = std::min<std::size_t>(m_flowBuffer.size(), 3);
+            for (std::size_t i = 0; i < shown; ++i)
+            {
+                m_flowUpNext.Append(m_flowBuffer[i]);
+            }
+        }
+        else if (auto nextId = m_queue.PeekNext(false))
+        {
+            // 顺序类模式：非破坏性预览队列的下一首，明确标「顺序」。
+            winrt::w_music::TrackItem track{ nullptr };
+            if (auto libraryTrack = wm::app::Library().FindTrack(hstring{ wm::app::Utf16(*nextId) }))
+            {
+                track = libraryTrack;
+            }
+            else if (const auto it = m_sideTracks.find(*nextId); it != m_sideTracks.end())
+            {
+                track = it->second;
+            }
+            if (track != nullptr)
+            {
+                auto row = winrt::make<winrt::w_music::implementation::RecommendItem>();
+                row.TrackId(track.Id());
+                row.Title(track.Title());
+                row.Artist(track.Artist());
+                row.Album(track.Album());
+                row.FilePath(track.FilePath());
+                row.ScoreText(hstring{ L"顺序" });
+                m_flowUpNext.Append(row);
+            }
+        }
+
+        if (flow)
+        {
+            if (!m_flowBuffer.empty())
+            {
+                m_flowStreamText = hstring{ L"已预载 " + std::to_wstring(m_flowBuffer.size())
+                    + L" 首，点「下一曲」立即播放（本地引擎后台补货）" };
+            }
+            else
+            {
+                auto& engine = wm::app::Recommend();
+                m_flowStreamText = !engine.IsReady() ||
+                                           engine.CurrentStage() != wm::app::RecommendService::Stage::Ready
+                    ? hstring{ L"本地推荐引擎预热中：先用顺序播放，就绪后自动回到推荐流" }
+                    : hstring{ L"推荐流暂时没有新歌：先按顺序播放，稍后自动补上" };
+            }
+        }
+        else
+        {
+            switch (m_mode)
+            {
+                case winrt::w_music::PlayMode::Shuffle:
+                    m_flowStreamText = hstring{ L"随机播放不预告下一首" };
+                    break;
+                case winrt::w_music::PlayMode::RepeatOne:
+                    m_flowStreamText = hstring{ L"单曲循环中：手动点「下一曲」才会切歌" };
+                    break;
+                case winrt::w_music::PlayMode::Sequential:
+                    m_flowStreamText = hstring{ L"按文件顺序切歌（传统模式），到列表末尾就停" };
+                    break;
+                default:
+                    m_flowStreamText = hstring{ L"按文件顺序循环切歌（传统模式）" };
+                    break;
+            }
+        }
+
+        RaisePropertyChanged(L"FlowHeaderText");
+        RaisePropertyChanged(L"FlowStreamText");
+        RaisePropertyChanged(L"IsFlowMode");
+        RaisePropertyChanged(L"FlowRefreshVisibility");
+    }
+
+    void PlayerViewModel::LikeCurrent()
+    {
+        auto track = m_currentTrack;
+        if (track == nullptr)
+        {
+            return;
+        }
+        SendCurrentFeedback(track, L"like");
+        ShowFlowStatus(hstring{ L"已点赞，这类听感会加权" });
+    }
+
+    void PlayerViewModel::DislikeCurrent()
+    {
+        auto track = m_currentTrack;
+        if (track == nullptr)
+        {
+            return;
+        }
+        SendCurrentFeedback(track, L"dislike");
+        // 差评：从当前播放队列去掉、清掉缓冲里同曲的预告，立即流向下一首。
+        m_queue.RemoveAll(IdOf(track.Id()));
+        std::wstring const path{ track.FilePath().c_str() };
+        for (auto it = m_flowBuffer.begin(); it != m_flowBuffer.end();)
+        {
+            if (std::wstring{ it->FilePath().c_str() } == path)
+            {
+                it = m_flowBuffer.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        if (!IsRemotePath(std::wstring_view{ track.FilePath().c_str() }))
+        {
+            RememberRejectedPath(wm::app::Utf8(path));
+        }
+        ShowFlowStatus(hstring{ L"已减少这类歌曲，换一首" });
+        if (IsFlowMode())
+        {
+            FlowNext(false);
+        }
+        else
+        {
+            FallbackQueueNext(false);
+        }
+        RefreshFlowUi();
+    }
+
+    void PlayerViewModel::SendCurrentFeedback(winrt::w_music::TrackItem const& track, wchar_t const* event)
+    {
+        auto& engine = wm::app::Recommend();
+        if (!engine.IsReady())
+        {
+            return;
+        }
+        const std::string id = IdOf(track.Id());
+        if (StartsWith(id, "rec:"))
+        {
+            engine.SendFeedbackAsync(hstring{ wm::app::Utf16(id.substr(4)) }, hstring{ event });
+        }
+        else
+        {
+            // 曲库曲没有引擎的内容 hash，让引擎按文件路径自己解析。
+            engine.SendFeedbackForPathAsync(track.FilePath(), hstring{ event });
+        }
+    }
+
+    void PlayerViewModel::ShowFlowStatus(hstring text)
+    {
+        m_flowStatusText = std::move(text);
+        RaisePropertyChanged(L"FlowStatusText");
+        if (m_flowStatusTimer == nullptr && m_dispatcher != nullptr)
+        {
+            m_flowStatusTimer = m_dispatcher.CreateTimer();
+            m_flowStatusTimer.Interval(std::chrono::milliseconds{ 2600 });
+            m_flowStatusTimer.IsRepeating(false);
+            m_flowStatusTimer.Tick([weak = get_weak()](auto&&, auto&&) {
+                if (auto self = weak.get())
+                {
+                    self->m_flowStatusText = hstring{};
+                    self->RaisePropertyChanged(L"FlowStatusText");
+                }
+            });
+        }
+        if (m_flowStatusTimer != nullptr)
+        {
+            m_flowStatusTimer.Start();
+        }
+    }
+
+    void PlayerViewModel::RememberSideTrack(winrt::w_music::TrackItem const& track)
+    {
+        if (track == nullptr || wm::app::Library().FindTrack(track.Id()) != nullptr)
+        {
+            return; // 曲库曲走 Library().FindTrack，不需要旁路
+        }
+        // insert_or_assign, not operator[]: subscripting a missing key
+        // default-constructs the mapped projected TrackItem, and C++/WinRT
+        // builds one by *activating* w_music.TrackItem -- an unpackaged process
+        // cannot resolve that, so it throws 0x80040154 (没有注册类). Only "rec:"
+        // ids reach this line (library ids early-return above), which is why
+        // every recommendation-list click crashed while library plays never did.
+        m_sideTracks.insert_or_assign(IdOf(track.Id()), track);
     }
 
     void PlayerViewModel::Seek(double seconds)
@@ -294,9 +864,13 @@ namespace winrt::w_music::implementation
         ids.reserve(tracks.Size());
         for (std::uint32_t i = 0; i < tracks.Size(); ++i)
         {
-            ids.push_back(IdOf(tracks.GetAt(i).Id()));
+            auto const& item = tracks.GetAt(i);
+            ids.push_back(IdOf(item.Id()));
+            RememberSideTrack(item);
         }
         m_queue.SetTracks(std::move(ids), startIndex);
+        // 「接下来」卡片的队列预览要跟着新队列走。
+        RefreshFlowUi();
     }
 
     void PlayerViewModel::PlayTrack(winrt::w_music::TrackItem const& track)
@@ -305,6 +879,7 @@ namespace winrt::w_music::implementation
         {
             return;
         }
+        RememberSideTrack(track);
         m_queue.JumpToId(IdOf(track.Id()));
         StartPlaybackAsync(track);
     }
@@ -314,6 +889,14 @@ namespace winrt::w_music::implementation
         if (auto track = wm::app::Library().FindTrack(trackId))
         {
             StartPlaybackAsync(track);
+            return;
+        }
+        // rec: 行（引擎建议）不在曲库索引里，从旁路表取回对象。
+        // 修掉的老 bug：推荐列表放到歌尾时 Next/MediaEnded 解析不出 id，
+        // 播放会直接停在每首的结尾。
+        if (const auto it = m_sideTracks.find(IdOf(trackId)); it != m_sideTracks.end())
+        {
+            StartPlaybackAsync(it->second);
         }
     }
 
@@ -338,6 +921,33 @@ namespace winrt::w_music::implementation
             m_durationSeconds = 0.0;
             track.IsPlaying(true);
 
+            // 推荐流微调窗口：记住最近 30 首的文件路径（在线流不进窗口）。
+            if (!IsRemotePath(std::wstring_view{ track.FilePath() }))
+            {
+                m_recentPaths.push_back(wm::app::Utf8(track.FilePath()));
+                while (m_recentPaths.size() > kRecentWindow)
+                {
+                    m_recentPaths.pop_front();
+                }
+                // 手动点播的曲子可能正躺在预取缓冲里当预告：把它清出去，
+                // 否则流模式下「下一曲」会原曲重播。
+                std::wstring const path{ track.FilePath().c_str() };
+                const auto bufferBefore = m_flowBuffer.size();
+                for (auto it = m_flowBuffer.begin(); it != m_flowBuffer.end();)
+                {
+                    if (std::wstring{ it->FilePath().c_str() } == path)
+                    {
+                        it = m_flowBuffer.erase(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
+                }
+                m_flowPurgedCurrent = m_flowBuffer.size() != bufferBefore;
+            }
+            RememberSideTrack(track);
+
             RaisePropertyChanged(L"CurrentTrack");
             RaisePropertyChanged(L"HasTrack");
             RaisePropertyChanged(L"Title");
@@ -348,6 +958,13 @@ namespace winrt::w_music::implementation
             RaisePropertyChanged(L"PositionText");
             RaisePropertyChanged(L"DurationSeconds");
             RaisePropertyChanged(L"DurationText");
+            // 队列预览随当前曲变化；推荐流的预告与当前曲无关（缓冲没变）
+            // 就不重建，免得预告行每次切歌都闪一下。当前曲占用的预告位
+            // 被清掉时还是要刷。
+            if (!IsFlowMode() || m_flowPurgedCurrent)
+            {
+                RefreshFlowUi();
+            }
 
             std::wstring path{ track.FilePath().c_str() };
             const bool remote = path.rfind(L"http://", 0) == 0 || path.rfind(L"https://", 0) == 0;
@@ -609,6 +1226,13 @@ namespace winrt::w_music::implementation
         m_mode = value;
         m_coreMode = ToCoreMode(value);
         m_queue.SetMode(m_coreMode);
+        if (IsFlowMode())
+        {
+            // 回到推荐流：对齐时间窗并先把缓冲填上（后台，不挡切歌）。
+            SyncFlowWindow();
+            EnsureFlowBufferAsync(false);
+        }
+        RefreshFlowUi();
         RaisePropertyChanged(L"Mode");
         RaisePropertyChanged(L"ModeText");
     }
@@ -620,6 +1244,7 @@ namespace winrt::w_music::implementation
             case winrt::w_music::PlayMode::Sequential: return hstring{ L"顺序播放" };
             case winrt::w_music::PlayMode::Shuffle: return hstring{ L"随机播放" };
             case winrt::w_music::PlayMode::RepeatOne: return hstring{ L"单曲循环" };
+            case winrt::w_music::PlayMode::Radio: return hstring{ L"推荐流" };
             default: return hstring{ L"列表循环" };
         }
     }
@@ -627,7 +1252,7 @@ namespace winrt::w_music::implementation
     void PlayerViewModel::CycleMode()
     {
         const auto next = static_cast<int>(m_mode) + 1;
-        Mode(static_cast<winrt::w_music::PlayMode>(next % 4));
+        Mode(static_cast<winrt::w_music::PlayMode>(next % 5));
     }
 
     // ---------------------------------------------------------------- lyrics

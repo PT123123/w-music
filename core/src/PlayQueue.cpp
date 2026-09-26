@@ -122,6 +122,30 @@ std::optional<std::string> PlayQueue::Next(bool autoAdvance) {
     return Current();
 }
 
+std::optional<std::string> PlayQueue::PeekNext(bool autoAdvance) const {
+    if (ids_.empty()) {
+        return std::nullopt;
+    }
+
+    if (mode_ == PlayMode::RepeatOne) {
+        if (autoAdvance) {
+            return Current(); // natural end -> repeat, same as Next()
+        }
+        // explicit user action -> move on, fall through
+    } else if (mode_ == PlayMode::Shuffle) {
+        return std::nullopt;
+    }
+
+    std::ptrdiff_t next = index_ + 1;
+    if (next >= static_cast<std::ptrdiff_t>(ids_.size())) {
+        if (mode_ == PlayMode::Sequential) {
+            return std::nullopt;
+        }
+        next = 0; // LoopAll / RepeatOne fallback
+    }
+    return ids_[static_cast<std::size_t>(next)];
+}
+
 std::optional<std::string> PlayQueue::Previous() {
     if (ids_.empty()) {
         return std::nullopt;
@@ -161,6 +185,49 @@ std::optional<std::string> PlayQueue::JumpToId(const std::string& id) {
         return std::nullopt;
     }
     return JumpTo(static_cast<std::size_t>(std::distance(ids_.begin(), it)));
+}
+
+void PlayQueue::Append(std::vector<std::string> newIds) {
+    if (newIds.empty()) {
+        return;
+    }
+    ids_.insert(ids_.end(), std::make_move_iterator(newIds.begin()),
+                std::make_move_iterator(newIds.end()));
+    // ShuffleAdvance rebuilds the order when its size no longer matches.
+    shuffleOrder_.clear();
+    shufflePos_ = 0;
+}
+
+bool PlayQueue::RemoveAll(const std::string& id) {
+    bool removed = false;
+    std::vector<std::string> kept;
+    kept.reserve(ids_.size());
+    for (std::size_t i = 0; i < ids_.size(); ++i) {
+        if (ids_[i] != id) {
+            kept.push_back(std::move(ids_[i]));
+            continue;
+        }
+        removed = true;
+        if (static_cast<std::ptrdiff_t>(i) < index_) {
+            --index_; // removals before the current track shift it left
+        }
+        // Removing the current track keeps index_ in place: it now points at
+        // whatever followed it.
+    }
+    // kept now owns every id either way -- move it back even when nothing was
+    // removed, or the moved-from strings would gut the queue.
+    ids_ = std::move(kept);
+    if (!removed) {
+        return false;
+    }
+    if (ids_.empty()) {
+        index_ = -1;
+    } else if (index_ >= static_cast<std::ptrdiff_t>(ids_.size())) {
+        index_ = static_cast<std::ptrdiff_t>(ids_.size()) - 1;
+    }
+    shuffleOrder_.clear();
+    shufflePos_ = 0;
+    return true;
 }
 
 } // namespace wm::core

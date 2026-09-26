@@ -1,4 +1,4 @@
-namespace w_music
+﻿namespace w_music
 {
     enum PlayMode
     {
@@ -6,6 +6,11 @@ namespace w_music
         LoopAll = 1,
         Shuffle = 2,
         RepeatOne = 3,
+        /// 推荐流（flow，默认）：下一首从预取缓冲出队（缓冲由本地引擎在
+        /// 后台按口味画像补货 + 磁盘缓存垫底），按时间窗整流刷新；缓冲
+        /// 空时降级为顺序队列并诚实标注。传统的按文件顺序切歌由
+        /// Sequential / LoopAll / Shuffle / RepeatOne 保留。
+        Radio = 4,
     };
 
     /// Everything the UI needs to drive (and observe) the player:
@@ -34,6 +39,27 @@ namespace w_music
         PlayMode Mode { get; set; };
         String ModeText { get; };
         Boolean IsFavorite { get; set; };
+        /// 手势反馈的一行轻提示（"已点赞…"），几秒后自动清空；空串 = 不显示。
+        String FlowStatusText { get; };
+
+        // ---- 推荐流「接下来」卡片 ----
+        /// 当前是否处于推荐流模式（Radio）。
+        Boolean IsFlowMode { get; };
+        /// 接下来要播的预告：推荐流 = 预取缓冲前 3 行；顺序模式 = 队列预览 1 行
+        /// （ScoreText 标「顺序」）；随机模式没有预告。
+        Windows.Foundation.Collections.IObservableVector<RecommendItem> FlowUpNext { get; };
+        /// 卡片标题：「接下来 · 推荐流（晚间）」/「接下来 · 顺序播放」。
+        String FlowHeaderText { get; };
+        /// 卡片底部诚实说明：已预载几首 / 引擎预热中 / 随机不预告。
+        String FlowStreamText { get; };
+        /// 「换一个」按钮只在推荐流模式显示。
+        Microsoft.UI.Xaml.Visibility FlowRefreshVisibility { get; };
+        /// 点击预告行：直接播放这首（它前面的预告一并作废）。
+        void PlayFlowUpNext(Int32 index);
+        /// 「换一个」：跳过缓冲头部的预告，后台补一首新的。
+        void SkipFlowSlot();
+        /// 曲库（重）加载完成：缓存指纹就位，值得再试一次离线种子。
+        void NotifyLibraryReady();
 
         // ---- lyrics ----
         Windows.Foundation.Collections.IObservableVector<LyricLineItem> Lyrics { get; };
@@ -47,6 +73,10 @@ namespace w_music
         void Seek(Double seconds);
         void CycleMode();
         void ToggleFavorite();
+        /// 点赞当前曲：回传引擎加权口味画像，播放继续。
+        void LikeCurrent();
+        /// 差评当前曲：回传引擎、从当前播放队列移除，并立即流向下一首相似曲。
+        void DislikeCurrent();
         void SetQueue(Windows.Foundation.Collections.IVector<TrackItem> tracks, Int32 startIndex);
         void PlayTrack(TrackItem track);
         void PlayTrackById(String trackId);

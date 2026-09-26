@@ -370,11 +370,85 @@ void TestPlayQueue() {
     CHECK(queue.JumpToId("d") == std::optional<std::string>("d"));
     CHECK(queue.Current() == std::optional<std::string>("d"));
 
+    // Append extends the tail (radio flow) without touching the current track.
+    queue.SetMode(wm::core::PlayMode::LoopAll);
+    queue.SetTracks({"a", "b"}, 0);
+    queue.Append({"x", "y"});
+    CHECK(queue.Current() == std::optional<std::string>("a"));
+    CHECK(queue.Next(true) == std::optional<std::string>("b"));
+    CHECK(queue.Next(true) == std::optional<std::string>("x"));
+    CHECK(queue.Next(true) == std::optional<std::string>("y"));
+    CHECK(queue.Ids().size() == 4);
+    // Shuffle still covers appended tracks (lazy rebuild on size mismatch).
+    queue.SetMode(wm::core::PlayMode::Shuffle);
+    CHECK(queue.Next(true).has_value());
+    CHECK(queue.Ids().size() == 4);
+
+    // RemoveAll drops every occurrence and keeps the index consistent.
+    queue.SetMode(wm::core::PlayMode::LoopAll);
+    queue.SetTracks({"a", "b", "c", "b", "d"}, 2); // current = "c"
+    CHECK(queue.RemoveAll("b"));
+    CHECK(queue.Ids() == std::vector<std::string>({"a", "c", "d"}));
+    CHECK(queue.Current() == std::optional<std::string>("c"));
+    CHECK(queue.Next(true) == std::optional<std::string>("d"));
+    // Removing the current track lands the index on whatever followed it
+    // (on the previous one when it was the tail).
+    CHECK(queue.RemoveAll("d"));
+    CHECK(queue.Current() == std::optional<std::string>("c"));
+    // Removing an absent id is a no-op.
+    CHECK(!queue.RemoveAll("zz"));
+    // Removing everything empties safely.
+    CHECK(queue.RemoveAll("a"));
+    CHECK(queue.RemoveAll("c"));
+    CHECK(queue.Current() == std::nullopt);
+    CHECK(queue.Next(true) == std::nullopt);
+
     // Empty queue is safe.
     queue.Clear();
     CHECK(queue.Next(true) == std::nullopt);
     CHECK(queue.Previous() == std::nullopt);
     CHECK(queue.Current() == std::nullopt);
+}
+
+void TestPlayQueuePeekNext() {
+    std::cout << "[PlayQueue::PeekNext]\n";
+
+    wm::core::PlayQueue queue;
+
+    // Peek is a pure read: same answer twice, and Next() lands on it.
+    queue.SetMode(wm::core::PlayMode::Sequential);
+    queue.SetTracks({"a", "b", "c"}, 0);
+    CHECK(queue.PeekNext(true) == std::optional<std::string>("b"));
+    CHECK(queue.PeekNext(true) == std::optional<std::string>("b"));
+    CHECK(queue.Index() == 0);
+    CHECK(queue.Next(true) == std::optional<std::string>("b"));
+
+    // Sequential at the tail peeks nothing (the queue stops there).
+    queue.SetTracks({"a", "b", "c"}, 2);
+    CHECK(queue.PeekNext(true) == std::nullopt);
+    CHECK(queue.Current() == std::optional<std::string>("c"));
+
+    // LoopAll wraps in the peek as well.
+    queue.SetMode(wm::core::PlayMode::LoopAll);
+    queue.SetTracks({"a", "b", "c"}, 2);
+    CHECK(queue.PeekNext(true) == std::optional<std::string>("a"));
+
+    // RepeatOne: auto peek repeats, explicit peek moves on.
+    queue.SetMode(wm::core::PlayMode::RepeatOne);
+    queue.SetTracks({"a", "b", "c"}, 1);
+    CHECK(queue.PeekNext(true) == std::optional<std::string>("b"));
+    CHECK(queue.PeekNext(false) == std::optional<std::string>("c"));
+
+    // Shuffle cannot preview without consuming its order: peeks nothing...
+    queue.SetMode(wm::core::PlayMode::Shuffle);
+    queue.SetTracks({"a", "b", "c", "d"}, 0);
+    CHECK(queue.PeekNext(true) == std::nullopt);
+    // ...and the peek left the shuffled order intact for Next().
+    CHECK(queue.Next(true).has_value());
+
+    // Empty queue peeks nothing.
+    queue.Clear();
+    CHECK(queue.PeekNext(true) == std::nullopt);
 }
 
 void TestEqualizer() {
@@ -498,6 +572,7 @@ int main() {
     TestJson();
     TestLibrary();
     TestPlayQueue();
+    TestPlayQueuePeekNext();
 
     std::cout << "\n" << gPassed << " passed, " << gFailed << " failed\n";
     return gFailed == 0 ? 0 : 1;
