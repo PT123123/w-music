@@ -247,8 +247,10 @@ if (-not (Test-VersionInfo $versionInfo $version)) {
 $running = @(Get-RunningApp)
 if ($running.Count -gt 0) {
     $pids = ($running | ForEach-Object { $_.Id }) -join ', '
-    Write-Host "  [note] $($running.Count) x $AppName.exe already running (pid $pids) -- an earlier deploy" -ForegroundColor Yellow
-    Write-Host '         keeps playing its own copy; this build starts alongside it.' -ForegroundColor Yellow
+    Write-Host "  [note] $AppName is already running (pid $pids); launching this build takes over:" -ForegroundColor Yellow
+    Write-Host '         the old instance is asked to exit gracefully (single-instance hand-off by' -ForegroundColor Yellow
+    Write-Host '         exe path, from 0.1.22 on; older builds ignore the request -- exit those' -ForegroundColor Yellow
+    Write-Host '         from the tray once and the hand-off is automatic from then on).' -ForegroundColor Yellow
 }
 
 $pages = @(Get-ChildItem -LiteralPath (Join-Path $dest 'w_music') -Filter '*.xbf' -File).Count

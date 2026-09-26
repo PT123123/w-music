@@ -1182,6 +1182,23 @@ namespace wm::app
                                   wm::core::json::Serialize(body, false));
     }
 
+    // The engine side resolves file_path -> track_id with a read-only lookup
+    // (server.py /v1/feed/feedback), so gestures on plain library tracks can
+    // feed the taste profile without knowing content hashes.
+    IAsyncAction RecommendService::SendFeedbackForPathAsync(hstring filePath, hstring eventId)
+    {
+        if (!m_ready || filePath.empty())
+        {
+            co_return;
+        }
+        wm::core::json::Value body = wm::core::json::Object{};
+        body["user_id"] = "local-user";
+        body["file_path"] = Utf8(filePath);
+        body["event"] = Utf8(eventId);
+        co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/feed/feedback",
+                                  wm::core::json::Serialize(body, false));
+    }
+
     IAsyncAction RecommendService::ResetTasteAsync()
     {
         if (!m_ready)

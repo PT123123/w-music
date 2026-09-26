@@ -127,6 +127,17 @@ namespace wm::app
                 }
                 return 0;
             }
+            if (message == WM_TRAY_GRACEFUL_EXIT)
+            {
+                // 新版本实例请求本实例退出。必须走 m_onExit（托盘"退出"的同
+                // 一条路），让关闭清理（移托盘图标、停引擎）照常执行，不能
+                // 直接 ExitProcess。
+                if (self->m_onExit)
+                {
+                    self->m_onExit();
+                }
+                return 0;
+            }
             if (message == WM_DESTROY)
             {
                 self->m_messageWindow = nullptr;

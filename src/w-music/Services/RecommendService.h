@@ -168,6 +168,12 @@ namespace wm::app
         winrt::Windows::Foundation::IAsyncAction
             SendFeedbackAsync(hstring trackId, hstring eventId);
 
+        /// Same endpoint for tracks the w-music library knows only by path
+        /// (engine ids are content hashes w-music cannot compute): the engine
+        /// resolves file_path -> track_id itself. Fire and forget.
+        winrt::Windows::Foundation::IAsyncAction
+            SendFeedbackForPathAsync(hstring filePath, hstring eventId);
+
         /// POST /v1/feed/reset?scope=all.
         winrt::Windows::Foundation::IAsyncAction ResetTasteAsync();
 

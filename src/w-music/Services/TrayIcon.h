@@ -15,6 +15,12 @@ namespace wm::app
     /// WM_APP 段（0x8000-0xBFFF）是应用自定义消息，可跨进程投递。
     inline constexpr UINT WM_TRAY_SHOW_MAIN = WM_APP + 2;
 
+    /// 跨进程"优雅退出"消息：新版本实例接管时投给旧版本的托盘窗口，旧实例
+    /// 走托盘菜单"退出"的同一条清理路径。两边的值必须一致，所以和上面的
+    /// WM_TRAY_SHOW_MAIN 一样写死段内偏移；0.1.21 及更早的旧版本不认识它，
+    /// 收到会静默忽略——那种情况下交接等超时后退回"唤到前台"。
+    inline constexpr UINT WM_TRAY_GRACEFUL_EXIT = WM_APP + 3;
+
     /// System-tray icon (Shell_NotifyIcon) for w-music.
     ///
     /// Owns a message-only window that receives the tray callback messages:

@@ -213,10 +213,41 @@ namespace wm::app
         LONG CALLBACK FaultWatcher(EXCEPTION_POINTERS* info)
         {
             const auto* record = info != nullptr ? info->ExceptionRecord : nullptr;
-            if (record != nullptr && record->ExceptionCode == static_cast<DWORD>(STATUS_ACCESS_VIOLATION) &&
-                g_avCount.fetch_add(1) < 4)
+            if (record == nullptr)
             {
-                LogFault("AV", info);
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
+            const DWORD code = record->ExceptionCode;
+            if (code == static_cast<DWORD>(STATUS_ACCESS_VIOLATION))
+            {
+                if (g_avCount.fetch_add(1) < 4)
+                {
+                    LogFault("AV", info);
+                }
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
+            // Stowed-exception forensics: the 0xC000027B fail-fast itself never
+            // reaches any handler we can register, but the exception that was
+            // stowed into it DID cross this handler as a first chance -- a C++
+            // throw (hresult_error) or the wrong-thread guard raising directly.
+            // Log the first few with a stack scan; the .map of the same link
+            // names the throw site. Caps keep legitimate raise-and-swallow
+            // traffic (HTTP failures, engine cooldowns) from flooding diag.log.
+            if (code == 0xE06D7363u && g_avCount.fetch_add(1) < 16)
+            {
+                LogFault("EH1", info);
+            }
+            else if (code == 0x8001010Eu && g_avCount.fetch_add(1) < 8)
+            {
+                LogFault("WT1", info);
+            }
+            else if (code == 0x80040154u && g_avCount.fetch_add(1) < 8)
+            {
+                LogFault("NC1", info);
+            }
+            else if (code == 0xC000027Bu && g_avCount.fetch_add(1) < 4)
+            {
+                LogFault("STOWED", info);
             }
             return EXCEPTION_CONTINUE_SEARCH;
         }

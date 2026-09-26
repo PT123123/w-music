@@ -125,6 +125,20 @@ function New-CombinedAppIdl {
     $sb = [System.Text.StringBuilder]::new()
     foreach ($full in $IdlPaths) {
         if (-not (Test-Path $full)) { throw "idl not found: $full" }
+        # midlrt decodes BOM-less idls with the system ANSI code page (936 on
+        # this machine; the chronic C4819 warning says as much). Under that
+        # decoding a Chinese comment whose trailing UTF-8 byte pairs with the
+        # CR swallows the NEXT LINE, and the member on it silently vanishes
+        # from the winmd -- a PlayMode enum value was lost exactly this way.
+        # A UTF-8 BOM makes midlrt decode properly, so enforce it on every
+        # non-ASCII idl instead of relying on byte-count luck.
+        $bytes = [IO.File]::ReadAllBytes($full)
+        $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+        $isAscii = $true
+        foreach ($b in $bytes) { if ($b -gt 0x7F) { $isAscii = $false; break } }
+        if (-not $hasBom -and -not $isAscii) {
+            throw "idl '$full' is non-ASCII without a UTF-8 BOM. midlrt would decode it as ANSI and silently drop idl members that follow certain Chinese comments -- save the file as 'UTF-8 with BOM'."
+        }
         # Absolute paths: the combined file lives in build\, not next to the idls.
         [void]$sb.AppendLine("#include `"$full`"")
     }

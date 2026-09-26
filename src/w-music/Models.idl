@@ -1,4 +1,4 @@
-namespace w_music
+﻿namespace w_music
 {
     /// One track in the library / a playlist. Mirrors wm::core::TrackRecord.
     runtimeclass TrackItem : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
