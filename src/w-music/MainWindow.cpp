@@ -246,6 +246,7 @@ namespace winrt::w_music::implementation
         m_spectrumView.Attach(SpectrumCanvas(), 28);
         ThemeButton().Click({ this, &MainWindow::OnThemeClick });
         ApplyTheme(wm::app::Settings().UiTheme());
+        ApplyModeChips();
 
         // EQ 面板 + 把存档的均衡器配置推给播放器（此时还没有曲目，
         // SetEqualizerEnabled 只会记下开关，首播时再生效）。
@@ -467,9 +468,14 @@ namespace winrt::w_music::implementation
     }
 
     void MainWindow::OnPlayerPropertyChanged(Windows::Foundation::IInspectable const&,
-                                             winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs const&)
+                                             winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs const& args)
     {
         UpdateTransport();
+        // 模式只会在 Mode 变化时刷一次（进度每秒好几次，别跟着空转）。
+        if (args.PropertyName() == hstring{ L"Mode" })
+        {
+            ApplyModeChips();
+        }
     }
 
     void MainWindow::UpdateTransport()
@@ -511,6 +517,31 @@ namespace winrt::w_music::implementation
             return;
         }
         ApplyTheme(std::wstring{ winrt::unbox_value<hstring>(tag).c_str() });
+    }
+
+    void MainWindow::OnModeChipClick(Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto chip = sender.try_as<Primitives::ToggleButton>();
+        if (chip == nullptr)
+        {
+            return;
+        }
+        auto tagValue = chip.Tag();
+        if (tagValue == nullptr)
+        {
+            return;
+        }
+        const std::wstring tag = winrt::unbox_value_or<hstring>(tagValue, hstring{}).c_str();
+        using winrt::w_music::PlayMode;
+        if (tag == L"sequential")   { wm::app::Player().Mode(PlayMode::Sequential); }
+        else if (tag == L"loop")    { wm::app::Player().Mode(PlayMode::LoopAll); }
+        else if (tag == L"shuffle") { wm::app::Player().Mode(PlayMode::Shuffle); }
+        else if (tag == L"repeat")  { wm::app::Player().Mode(PlayMode::RepeatOne); }
+        else if (tag == L"radio")   { wm::app::Player().Mode(PlayMode::Radio); }
+
+        // 已经选中那枚被点了一下会被 ToggleButton 自己取消勾选，而 Mode() 对同值
+        // 直接返回、不会发 PropertyChanged，所以这里无条件把高亮刷回来。
+        ApplyModeChips();
     }
 
     void MainWindow::ApplyTheme(std::wstring const& themeId)
@@ -587,6 +618,17 @@ namespace winrt::w_music::implementation
             }
             icon.Visibility(theme.id == m_themeId ? Visibility::Visible : Visibility::Collapsed);
         }
+    }
+
+    void MainWindow::ApplyModeChips()
+    {
+        using winrt::w_music::PlayMode;
+        const auto mode = wm::app::Player().Mode();
+        ModeChipRadio().IsChecked(mode == PlayMode::Radio);
+        ModeChipSequential().IsChecked(mode == PlayMode::Sequential);
+        ModeChipLoopAll().IsChecked(mode == PlayMode::LoopAll);
+        ModeChipShuffle().IsChecked(mode == PlayMode::Shuffle);
+        ModeChipRepeatOne().IsChecked(mode == PlayMode::RepeatOne);
     }
 
     // -----------------------------------------------------------------------

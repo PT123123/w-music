@@ -26,6 +26,9 @@ namespace winrt::w_music::implementation
         // MainWindowT<MainWindow> 是基类，够不到子类的 private 成员。
         void OnThemeClick(winrt::Windows::Foundation::IInspectable const& sender,
                           winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        /// 底部播放条右侧常驻的播放模式胶囊：点哪枚就切到哪枚。
+        void OnModeChipClick(winrt::Windows::Foundation::IInspectable const& sender,
+                             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
     private:
         void OnLoaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -60,6 +63,10 @@ namespace winrt::w_music::implementation
         /// 主题资源（按钮/滑块/导航指示条会跟着变）。未知 id 回落到 qq。
         void ApplyTheme(std::wstring const& themeId);
         void UpdateThemeMarks();
+
+        /// 把五枚播放模式胶囊的高亮对齐 ViewModel 的 Mode（无论从胶囊、
+        /// 中间的循环按钮还是正在播放页切的）。
+        void ApplyModeChips();
 
         // --- 均衡器（EQ） ----------------------------------------------------
         /// EQ 面板的滑条全部由代码生成（11 根：前置 + 十段），XAML 只留容器。

@@ -143,7 +143,8 @@
                             <FontIcon Glyph="&#xE893;" FontSize="14" />
                         </Button>
                         <Button x:Name="ModeButton" Width="36" Height="36" CornerRadius="18" Padding="0"
-                                Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="播放模式">
+                                Background="Transparent" BorderThickness="0"
+                                ToolTipService.ToolTip="播放模式：按顺序循环切换五种模式（右边主题旁有常驻的模式胶囊，当前模式高亮）">
                             <FontIcon Glyph="&#xE8EE;" FontSize="14" />
                         </Button>
                         <Button x:Name="FavoriteBarButton" Width="36" Height="36" CornerRadius="18" Padding="0"
@@ -163,7 +164,7 @@
                     </Grid>
                 </Grid>
 
-                <!-- 右：主题 + 歌词 + 音量 -->
+                <!-- 右：主题 + 播放模式 + 均衡器 + 歌词 + 音量 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                     <!-- 主题切换：每个色块就是那个主题的渐变底色本身（直接引用
                          App.xaml 里的同一个画刷资源），所以预览和实际界面一致。
@@ -264,6 +265,26 @@
                             </Flyout>
                         </Button.Flyout>
                     </Button>
+                    <!-- 播放模式常驻：一个模式一个胶囊，点哪个就切到哪个，白底那枚是当前模式。
+                         以前只有中间那枚会循环的图标按钮，看不出现在是哪种模式。
+                         Tag 对应 ViewModels.idl 里的 PlayMode 枚举名。 -->
+                    <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                        <ToggleButton x:Name="ModeChipRadio" Tag="radio" Click="OnModeChipClick"
+                                      Content="推荐流" FontSize="11" Padding="8,3" MinWidth="0" Height="30"
+                                      ToolTipService.ToolTip="推荐流（默认）：按口味画像 + 时间窗由本地引擎补货，切歌零等待" />
+                        <ToggleButton x:Name="ModeChipSequential" Tag="sequential" Click="OnModeChipClick"
+                                      Content="顺序" FontSize="11" Padding="8,3" MinWidth="0" Height="30"
+                                      ToolTipService.ToolTip="顺序播放：按队列顺序播到最后一首就停" />
+                        <ToggleButton x:Name="ModeChipLoopAll" Tag="loop" Click="OnModeChipClick"
+                                      Content="列表循环" FontSize="11" Padding="8,3" MinWidth="0" Height="30"
+                                      ToolTipService.ToolTip="列表循环：播完一轮回到第一首" />
+                        <ToggleButton x:Name="ModeChipShuffle" Tag="shuffle" Click="OnModeChipClick"
+                                      Content="随机" FontSize="11" Padding="8,3" MinWidth="0" Height="30"
+                                      ToolTipService.ToolTip="随机播放：整轮随机，播完重洗" />
+                        <ToggleButton x:Name="ModeChipRepeatOne" Tag="repeat" Click="OnModeChipClick"
+                                      Content="单曲循环" FontSize="11" Padding="8,3" MinWidth="0" Height="30"
+                                      ToolTipService.ToolTip="单曲循环：一直播这一首" />
+                    </StackPanel>
                     <!-- 均衡器：11 根垂直滑条（前置 + 十段）由代码生成，XAML 只放容器 -->
                     <Button x:Name="EqButton" Padding="12,6" CornerRadius="14"
                             ToolTipService.ToolTip="均衡器">
