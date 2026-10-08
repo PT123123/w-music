@@ -31,6 +31,7 @@ src/w-music/              WinUI 3 应用
                           TrayIcon（Shell_NotifyIcon 托盘）、AppPaths、Services（单例）
   Audio/WasapiLoopback.*  WASAPI loopback 采集线程
   Controls/SpectrumView.* 直接操作 Rectangle 的频谱绘制（不走绑定，省开销）
+  Controls/StructureTimelineView.* 全曲响度曲线 + 段落色块的 Canvas 绘制（同上，不走绑定）
   Views/                  DiscoverPage / RecommendPage / OnlinePage / LibraryPage / NowPlayingPage
 adapters/                 适配器模板与文档（真实适配器放外部目录，见下）
 tools/gen_assets.py       生成 MSIX 占位图标（历史保留）
@@ -120,6 +121,17 @@ just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\works
 - 「**添加音乐文件夹**」走 shell 的 `IFileOpenDialog`（`FOS_PICKFOLDERS`）拿**绝对路径**：系统 COM 类，
   非打包进程也能解析。不用 `Windows.Storage.Pickers.FolderPicker` + `FutureAccessList`——那两个绑在
   **包身份**上，本应用是非打包的，调用即 `0x80040154 没有注册类`。
+- **这个对话框开在自己的 STA 线程上，不占用 XAML 线程**：`IFileOpenDialog::Show` 只有等对话框立起来之后
+  才开始泵消息，之前的 `CoCreateInstance`、恢复上次位置、枚举 shell 命名空间（还有任何注入本进程的
+  shell 扩展）全都**没有消息泵**。0.1.27 直接在 UI 线程上调它，点一下就可能整窗未响应
+  ——WER 记了一条 `AppHangTransient`（w-music.exe 0.1.27.0），`diag.log` 里那一轮连一行 `add-folder` 都没有，
+  因为旧代码在这段路径上一个检查点都没打。现在：对话框在独立线程 Show，协程每 50ms 轮询等待、UI 线程照常泵消息；
+  打开前把初始位置定成「最近一个还在磁盘上的曲库文件夹」，否则退回系统"音乐"文件夹，不再让 shell 去恢复
+  可能已经拔掉的盘。`diag.log` 新增 `pick: dialog opening` / `not answered after 5s` /
+  `dialog answered after <ms>ms path=…`，下次再卡就能直接指出卡在哪一段、卡了多久。
+  两条机制都有独立探针兜底：`tools\pick_thread_probe.cpp`（`pwsh -File tools\pick-thread-probe.ps1`，五条断言）——
+  对照臂证明 owner 线程一旦不停泵，自己的 `WM_TIMER` 心跳直接归零，而同样的停顿挪到工作线程上心跳照走；
+  另一臂证明 owner 窗口在主线程、对话框在别的线程 Show 时，选定的文件夹仍能正常取回。
 - 因此曲库记录的是路径而不是授权 token：`scanFolders` 与 `library.json` 一起放在
   `%LOCALAPPDATA%\w-music`，**部署新版本只换 `C:\workshop\w-music-<版本>` 目录，曲库与歌单不受影响**。
 - 递归扫描，读取标题/艺术家/专辑/时长/码率，重扫不会清掉播放次数与喜爱状态；扫描按 100 首一批入库并落盘，
@@ -157,12 +169,23 @@ just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\works
 - 歌单：`新建 / 删除 / 重命名 / 加入曲目`，内置「我喜欢的音乐」「最近播放」（不可删除）。
 - 喜爱：曲目行心形按钮、播放条、正在播放页均可切换，自动同步到内置喜爱歌单。
 - 播放队列：`顺序播放 / 列表循环 / 随机播放 / 单曲循环`，随机模式保证一轮内不重复。
+  五种模式（含默认的推荐流）在底部播放条右侧、主题按钮旁**常驻成一行胶囊**，白底那枚即当前模式，
+  点哪枚直接切到哪枚；中间那枚图标按钮保留「按顺序循环切换」的老用法，两处共用同一个 `Player.Mode`
+  （正在播放页的模式按钮也在同一条 `PropertyChanged("Mode")` 链上同步）。
 - 点任意曲目即以**当前列表**为队列播放（下一曲有上下文）。
 
 ### 4. 歌词
 - LRC 解析支持：`[mm:ss.xx]`、`[mm:ss]`、`[mm:ss:xx]`、一行多时间标签、`[offset:±ms]`、`<mm:ss.xx>` 增强逐字标签（自动剥离）、UTF-8 / UTF-16(BOM) / 换行符混合。
 - 自动查找歌词：音乐文件同目录同名 `.lrc` → `lyrics\` 子目录 → 同名子目录。
 - 实时高亮 + 自动居中滚动；**点击任意行跳转到该时间点**；`±0.5s` 微调整体偏移、可重置。
+- **每行歌词带本地引擎的段落标记**（见 §6）：行左缘一条竖色带 = 这句落在哪个段落（同一段落反复出现 = 同一种颜色），
+  段落**第一句**前面挂一枚小标签写「副歌 · A」「未命名 · B」。颜色与时间轴色块同源
+  （`Controls/StructureTimelineView` 的 `StructureGroupColor`，两处不会是两种配色）。
+  时间按 `(行时间 + 歌词偏移) / 1000` 秒算，所以 `±0.5s` 微调之后标记会跟着挪；歌词是后到的、
+  偏移可能被改掉，这两条都走 `PropertyChanged("Lyrics" / "LyricOffsetMs")` 重贴一遍。
+- **只有全曲分析才往歌词上贴**：旧版分析的段落时间是那 45 秒窗口里的相对偏移，贴到歌词上就等于把
+  「窗口第 5 秒」读成「全曲第 5 秒」，所以 `analysis_scope != full_track` 时一律清空标记（宁可没有，不摆错的）。
+  落在两段之间的缝隙里也不硬塞一个相近段落。
 
 ### 5. 个性推荐（本地 MIR 引擎）
 - 引擎是独立仓库 **[music-recommend](https://github.com/PT123123/music-recommend)**
@@ -224,6 +247,63 @@ just workshop-deploy    # 版本号 +1 → Release 构建 → 部署到 C:\works
   `<桌面>\music-recommend`；端口可用 `recommendServerPort` 覆盖（默认 26128）。
 
 
+### 6. 正在播放页：结构时间轴 + 本曲分析（全曲动态、段落、事件）
+- 数据只来自引擎的两个只读端点，播放器不自己复制 MIR 算法：
+  - `GET /v1/analysis?file_path=…` 带回 `duration_seconds` + `stale` + `track_id` + `analysis_scope` +
+    `dynamics.{time_seconds, rms_norm, meta, events}` + `segments[].{start, end, label, group, boundary_confidence, label_confidence}`；
+  - 拿到的 `track_id` 再问一次 `GET /v1/tracks/{track_id}`：BPM / 调性 / 和弦 / 响度分布 / 人声这些**标量列**
+    只在这一份里，`features_json` 里还带着「这几个数字究竟测在哪一段音频上」（`analysis_window`）和引擎自己那句
+    `field_meaning`（例如 `bass_energy_ratio` 是 20–250 Hz 的比例，不是贝斯这条乐器轨）。
+  界面不从曲线反推响度尺度：`dynamics.meta` 自己声明单位（dBFS）、平均电平、电平范围、每格几秒，照抄不猜。
+  v3 的曲线走引擎自己的秒栅格（`time_seconds` + `rms_norm`）；旧的 64 点 `energy_curve` 没有时间轴，
+  根本无法摆到时间线上，所以不画。
+
+- 渲染在 `Controls/StructureTimelineView`（纯 C++ + Canvas，与 `SpectrumView` 同一套路）：固定 96 个柱位、
+  14 个色块的形状池，只在 `SizeChanged` 整体重排，播放头每 tick 走 `SetPosition` 的快路；
+  段落色块按重复组的字母取色（同一组 = 同一颜色，反复出现的副歌自然同色），边界竖线的透明度就是 `boundary_confidence`。
+- **判定分数一律摆在界面上**：每张段落卡片第三行是「边界 0.74 · 命名 0.31」，每枚事件胶囊第二行是「置信 0.61」。
+  边界可信不等于命名可信——
+  没有监督模型时引擎把内部段落留成 `unknown`（界面写「未命名」），信息交给 A/B/C 分组承载。
+  底栏一句「共 N 段 · 重复归为 M 组（同色就是同一段落反复出现）· 响度 K 点。」
+- **时间轴下面还有「本曲分析」卡片**（就在歌词那一栏里，歌词上方）：一行状态（`本地引擎 · 全曲 + 最响窗口` /
+  `本地引擎 · 最响窗口`）+ 六行数字（全曲响度曲线的尺度、节奏、调性与和声、响度分布、人声与配器、段落序列与重复分组），
+  外加一排**动态事件胶囊**（堆叠 / 峰值 / 抽空 / 回落 / 释放）——点胶囊直接 seek 到那个时刻，
+  鼠标停上去是引擎自己的证据串（`rms_rise:+14.1dB_over_18s`），想知道这个峰值凭什么算出来就看得见。
+- **每个数字都带着它测自哪一段音频**：v3 之后动态 / 结构 / 响度分布是全曲，而 BPM / 调性 / 和声 / 人声 / 配器
+  引擎仍然只在**最响的 45 秒窗口**上测，所以这几行写「（最响的 0:50–1:35 窗口）」而不是含糊过去。
+  底注再补三句实话：引擎声明哪些是估计值（`estimate_flags`：和弦 / 旋律音高 / 人声存在 / 乐器能量 / 段落结构 / 动态事件）、
+  「置信度是未校准的模型分数，不能当概率读」、以及 `field_meaning` 里那些「这个代理量**不是**什么」。
+- 卡片只在引擎真的给出这一首的行时才出现（`a.ok` 为假就整张折叠），不摆空卡片；切歌时逐首清空
+  （`AnalysisStateText` 回到「读取中…」），非本地文件（在线曲）不显示。
+- 时间轴上点任意位置即 seek，段落卡片点进去从该段起点播。事件用 `Tapped` 而不是 `PointerPressed`：
+  WinUI 3 的 `PointerRoutedEventArgs` 没有 `GetPosition`（`TappedRoutedEventArgs` 有）。
+- x 轴不只信 `duration_seconds`：那是容器声明的秒数，尾部静音被剪掉、解码精度差异都可能让它比真实音频短，
+  于是 `RecommendService::ParseTimeline` 取「曲线最后一格的右边界 / 最后一个段落末尾 / `duration_seconds`」三者最大值。
+  引擎侧有对应的机器门：`tests/test_analysis_v2.py` 断言曲线覆盖范围与段落末尾都必须落在 `duration_seconds` 内，
+  并把时长故意谎报成 28 秒做过反向对照（确凿失败在 `assert (29.75 + 0.25) <= (28.0 + 1e-06)`）。
+- 不会为了一张曲线冷启动 Python：只有引擎已就绪、或上次打开过「个性推荐」页（`Settings().RecommendPrewarm()`）
+  才发这个请求，否则卡片直接说明「结构分析要用本地推荐引擎；用过「个性推荐」页后这里会自动出曲线」。
+  整个回传走 `fire_and_forget` + try/catch：一次 `stowed exception` 就足以让整个播放器没命，而一条曲线不值这个价。
+- 迟到的答案会被丢弃（回调里比对载荷的 `filePath` 与当前曲目），在途请求未回来时不重复发起；
+  内存里最多留 40 首分析（`TrackTimeline` 一份里同时装曲线、段落、事件和标量行），「分析曲库」之后整份作废重取
+  （`InvalidateCache()` 先清它，否则画的是旧算法的分段）。命中条件是 `ok || analysis.ok`：
+  旧版行虽然没有曲线，标量行照样值得缓存住，否则每次进这一页都多发两次 HTTP。
+- **旧曲库不会假装有新数据**：改造之前入库的行没有全曲曲线，时间轴会明写「这首歌还是旧版分析，没有全曲响度曲线；
+  在「个性推荐」页重新分析曲库后有」，「本曲分析」卡片里的数字则全部带「（最响的 … 窗口）」前缀 +
+  一句「重新分析曲库后段落与响度曲线才覆盖全曲」。实测本机这 93 首库 `analysis_version` / `dynamics_json` 全为 NULL
+  （最后一次分析 2026-09-25，`max(analyzed_at)`），所以在重新分析之前**画不出全曲形状**——这是事实，不是渲染失败。
+- **窗口里的段落一律不画到全曲轴上**：旧行的 `segments` 其实存在，但那是最响的 45 秒窗口内的相对偏移
+  （实测本机库里一条旧行：8 段铺在 0–45 秒，而 `duration_seconds` = 190.67，
+  且 `label` / `group` / 两个置信度全为 NULL）。
+  把它们画出来等于把窗口的形状冒充成这首歌的形状，所以 `ParseTimeline` 只在 `analysis_scope == "full_track"`
+  时才收下 `segments` 与 `dynamics.events`——时间轴色块、段落卡片、歌词上的标记同为一个门（旧库里这几处都是空的，
+  只有卡片里带窗口前缀的标量还在）。段落序列 (`segment_type_sequence`) 属于「引擎自己写的字符串」而不是时间戳，
+  旧行照旧显示，但前缀会写明它测自哪个窗口。
+  歌词上的段落标记也属于「只有全曲数据才画」的那一类，旧库里歌词是干净的。
+- 这一段的效果只能靠 `diag.log` 核对（桌面 UI 不允许脚本点）：`rec http /v1/analysis?file_path=…=NNNms`、
+  `rec http /v1/tracks/…=NNNms` 是两次请求，`rec analysis segs=N pts=K events=E fullTrack=0|1 row=0|1`
+  是解析结论，`lyric structure lines=L sections=N tagged=T` 是段落真的贴到歌词上的凭据（旧库里不会出现这一行）。
+
 ## 频谱是怎么接的
 
 `WasapiLoopback` 在后台线程抓系统混音（loopback）→ 转 float → `core::SpectrumAnalyzer`
@@ -238,16 +318,24 @@ UI 侧 66ms 的 `DispatcherQueueTimer` 取帧并让 `SpectrumView` 改 Rectangle
 
 - **向量化异常处理器**（`AddVectoredExceptionHandler(1, …)`）先看到故障，写一行
   `AV code=… rip=+<rva> fault=… ts=<PE 时间戳> tid=… ui=…` 加一行 `AV stack +<rva> +<rva> …`
-  （只记访问违例的前 4 次，栈上只挑落在 exe 代码段内的字，最多 24 个）；
+  （访问违例记前 12 次，栈上只挑落在 exe 代码段内的字，最多 24 个）；
   `SetUnhandledExceptionFilter` 再兜一层写 `CRASH` 同样的行。两者都只用 Win32 API 直接追加到
   `%LOCALAPPDATA%\w-music\diag.log`，不依赖 CRT。
+  会抛但被吞掉的那几类（`EH1` C++ throw / `WT1` 跨线程 / `NC1` 没有注册类 / `STOWED`）用**自己的**
+  配额计数：0.1.25 那次闪退 diag.log 里没有 AV 行，就是因为它们和 AV 共用一个计数，
+  引擎健康检查在启动时抛的十几次把 4 次的 AV 配额提前吃光了。同一处的重入保护也从全局 bool 改成
+  `thread_local`——以前别的线程正写着日志时，这次故障会被整行丢掉（`CRASH reentrant`），
+  现在只挡同线程的自我重入；追加写用 `FILE_APPEND_DATA`，本身不需要锁。
 - 链接规则带 `/MAP`，产物 `build\w-music.map` 与 exe 是同一次链接。解析：
 
 ```powershell
-python tools\crash_symbols.py    # 读 diag.log 的 AV/CRASH 行，按 map 里最近的导出符号还原调用栈
+python tools\crash_symbols.py    # 读 diag.log 的故障行，按 map 里最近的导出符号还原调用栈
+python tools\crash_symbols.py +bd3ec    # 已知偏移时直接解
 ```
 
   `ts=` 对不上就是拿错了 map——先确认 map 的时间戳和 AV 行的时间戳一致。
+  **进程死得太快、diag.log 里没有故障行**时，去应用程序日志要 `Application Error`（id 1000）事件：
+  它的「故障偏移」就是 exe 内的 RVA，直接喂给上面第二行命令即可（0.1.25 的 `+bd3ec` 这么来的）。
 
 **C++/WinRT 协程参数规则**（0.1.21 修的那次闪退就是它）：协程函数**别用引用参数**。MSVC 把
 `T const&` 按引用存进协程帧，而 IDL 方法进来时先过 generated produce shim，shim 里的接口是个临时对象；
@@ -257,6 +345,15 @@ python tools\crash_symbols.py    # 读 diag.log 的 AV/CRASH 行，按 map 里�
 `SelectCategoryAsync`（点「本曲库里自动发现的类别」chip 闪退，`category.Note()` 在 await 后读）
 就是这条规则的样本，同类写法在 `LoadOnlineLyric` / `ShowAddToPlaylistDialog` /
 `DownloadItemsAsync` / `ResolveNet24Tier` / `RunNet24Download` / `ImportFileAsync` / `ScanPathAsync` 一并改了。
+
+**页面订阅进程级单例必须配对 Loaded / Unloaded**（0.1.25 修的那次闪退就是它）：`wm::app::Player()`
+是 `static` 单例，活得比任何页面久，而 `{ this, &Page::OnX }` 形式的委托存的是**裸实现指针**，
+不会给页面加引用计数。`Frame.Navigate` 默认不缓存页面，离开「正在播放」就把实现对象释放了，
+下一次 `RaisePropertyChanged`（进度定时器每个 tick 都发）直接打进野指针——
+0xC0000005 at `NowPlayingPage::UpdateTransport`（在发现页点「每日推荐」触发，就是因为它在放歌）。
+规则：**控件自己的事件**（`Click` / `ItemClick` / `PointerPressed`）在构造函数订阅没问题，
+它们和控件同生共死；**订阅单例的一律挪到 `Loaded` 拿 token、`Unloaded` 用 token 退订**
+（`RecommendPage` 一直是这么写的，`NowPlayingPage` 以前漏了）。
 
 ## 核心层测试
 
