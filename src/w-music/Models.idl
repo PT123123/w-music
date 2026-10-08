@@ -90,6 +90,16 @@
         /// Computed from IsActive so the view can bind without a converter.
         Microsoft.UI.Xaml.Media.Brush Foreground { get; };
         Double FontSize { get; };
+
+        // ---- 本地引擎的结构分析：这一句落在哪一段里 ----
+        /// 段落名 + 重复组字母（"副歌 · A"）；只有该段的第一句带文字，其余为空。
+        String SegmentTag { get; set; };
+        /// Collapsed on every line that is not the first of its section, and on
+        /// every line while the engine has no full-track sections for this file.
+        Microsoft.UI.Xaml.Visibility HasSegmentTag { get; };
+        /// 左侧色条：同一重复组同一颜色，和结构卡片上的色块是同一套取色。
+        Microsoft.UI.Xaml.Media.Brush SegmentBar { get; set; };
+        Microsoft.UI.Xaml.Media.Brush SegmentTagForeground { get; set; };
     }
 
     /// One row produced by the local MIR recommendation engine (the separate

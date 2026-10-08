@@ -549,7 +549,7 @@ $appSources = @(
     'Services\DiscoverSettings.cpp', 'Services\RecommendService.cpp',
     'Services\Services.cpp', 'Services\TrayIcon.cpp',
     'Services\SingleInstance.cpp',
-    'Controls\SpectrumView.cpp', 'Audio\WasapiLoopback.cpp',
+    'Controls\SpectrumView.cpp', 'Controls\StructureTimelineView.cpp', 'Audio\WasapiLoopback.cpp',
     'Audio\EqualizedSource.cpp',
     'Views\DiscoverPage.cpp', 'Views\RecommendPage.cpp',
     'Views\LibraryPage.cpp',

@@ -38,6 +38,8 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -46,6 +48,114 @@
 
 namespace wm::app
 {
+    /// One section of a track, as the engine grouped it. `label` is a heuristic
+    /// estimate and is often "unknown" -- `group` (A/B/C) is the part that does
+    /// not need a name, it just says "this repeats".
+    struct TimelineSegment
+    {
+        double start = 0.0;
+        double end = 0.0;
+        std::wstring label;
+        std::wstring group;
+        double boundaryConfidence = 0.0;
+        double labelConfidence = 0.0;
+    };
+
+    /// A turning point the engine found on the loudness curve: it builds, peaks,
+    /// pulls back, drops or releases. `confidence` is the engine's own uncalibrated
+    /// model score -- the page prints it rather than letting it read as a fact.
+    struct DynamicsEvent
+    {
+        double time = 0.0;
+        std::wstring type;
+        double confidence = 0.0;
+        /// The engine's reason strings ("rms_rise:+14.1dB_over_18s"), joined.
+        std::wstring evidence;
+    };
+
+    /// The scalar columns of the same analysis row. They come from
+    /// GET /v1/tracks/{id} because /v1/analysis only carries the curves and the
+    /// sections, and they are measured on the loudest window of the track, not on
+    /// the whole file -- |windowStart| / |windowEnd| say which slice, and the page
+    /// prints that instead of letting "161 BPM" read as a whole-song statement.
+    struct TrackAnalysis
+    {
+        bool ok = false;
+        std::wstring engineTrackId;
+        /// "full_track" when the sections and the curve cover the whole file.
+        bool fullTrack = false;
+        std::wstring scope;
+
+        // rhythm (window scope)
+        double bpm = 0.0;
+        double beatConsistency = 0.0;
+        double danceability = 0.0;
+        double onsetDensity = 0.0;
+        // tonality and harmony (window scope, estimated)
+        std::wstring key;
+        std::wstring mode;
+        std::wstring chordSequence;
+        std::wstring chorusChordSequence;
+        double harmonicRhythm = 0.0;
+        double dissonance = 0.0;
+        // loudness distribution
+        double dynamicRange = 0.0;
+        double crestFactor = 0.0;
+        double rmsMean = 0.0;
+        // voice and instrumentation (window scope, heuristics)
+        bool hasVocal = false;
+        double vocalRatio = 0.0;
+        std::wstring vocalGender;
+        /// 20–250 Hz 能量占比（引擎注明：不等于 bass 乐器）。
+        double lowBandRatio = 0.0;
+        /// HPSS 打击性成分占比（引擎注明：不是鼓组轨道数）。
+        double drumRatio = 0.0;
+        double lowEnergyRatio = 0.0;
+        double midEnergyRatio = 0.0;
+        double highEnergyRatio = 0.0;
+        double spectralCentroid = 0.0;
+        // structure summary
+        std::wstring segmentTypeSequence;
+        std::wstring groupSequence;
+        int chorusRepeatCount = 0;
+        // honesty payload: which numbers are estimates, and what each proxy measures
+        std::wstring estimateFlags;
+        std::vector<std::wstring> fieldNotes;
+
+        double windowStart = 0.0;
+        double windowEnd = 0.0;
+    };
+
+    /// The full-track dynamics curve plus its sections, for the now-playing
+    /// timeline. Plain C++ on purpose: a few thousand buckets boxed into WinRT
+    /// vectors would cost more than the drawing.
+    struct TrackTimeline
+    {
+        bool ok = false;
+        /// Analysed by an older algorithm version: still shown, labelled as such.
+        bool stale = false;
+        std::wstring filePath;
+        double duration = 0.0;
+        /// Bucket centers in seconds (the engine's own time grid) and the
+        /// normalized loudness at each -- never a 64-value blob without an axis.
+        std::vector<double> curveTimes;
+        std::vector<double> curve;
+        std::vector<TimelineSegment> segments;
+        std::vector<DynamicsEvent> events;
+        /// What the curve's numbers mean: the engine's own dBFS scale, its average
+        /// level and level range, plus the notes on what each proxy is not.
+        double levelMeanDb = 0.0;
+        double levelRangeDb = 0.0;
+        double curveInterval = 0.0;
+        std::wstring curveUnit;
+        std::vector<std::wstring> curveNotes;
+        /// The scalar columns of the same row (GET /v1/tracks/{id}).
+        TrackAnalysis analysis;
+        /// What the answer is worth: engine unavailable, file not indexed,
+        /// older analysis. The page prints it instead of guessing.
+        std::wstring note;
+    };
+
     class RecommendService
     {
     public:
@@ -188,6 +298,19 @@ namespace wm::app
         /// for the status strip. Returns an error text on failure.
         winrt::Windows::Foundation::IAsyncOperation<hstring> FeedStateTextAsync();
 
+        // ---- per-track structure timeline (GET /v1/analysis) ----
+        /// Timeline already fetched for this file in the current session. Cheap
+        /// and disk-free: navigating back to the now-playing page never waits on
+        /// the network for the same track.
+        bool PeekTimeline(std::wstring_view filePath, TrackTimeline& out) const;
+
+        /// GET /v1/analysis?file_path=... plus, for the same row, GET
+        /// /v1/tracks/{track_id} for the scalar columns. |done| runs on the
+        /// thread that called this (the UI thread), always, including on failure
+        /// -- |TrackTimeline.note| carries the reason.
+        winrt::fire_and_forget RequestTimelineAsync(std::wstring filePath,
+                                                    std::function<void(TrackTimeline)> done);
+
         /// Last failure text (empty when everything worked). Cleared by the
         /// next successful call.
         hstring LastError() const noexcept { return m_lastError; }
@@ -246,6 +369,18 @@ namespace wm::app
 
         std::wstring BaseUri() const;
 
+        /// GET /v1/analysis body -> TrackTimeline. Shared by the live call and
+        /// the session memo, so a remembered answer reads exactly as it did live.
+        /// |engineError| is RecommendService::LastError() of that request.
+        static TrackTimeline ParseTimeline(std::wstring_view jsonText, std::wstring filePath,
+                                           hstring const& engineError);
+
+        /// Fills |tl.analysis| from GET /v1/tracks/{track_id} (the row's scalar
+        /// columns + the extras hidden in features_json). No-op on an unreadable
+        /// answer: the curve already on |tl| stays painted either way.
+        static void MergeAnalysisRow(TrackTimeline& tl, std::wstring_view rowJson,
+                                     hstring const& engineError);
+
         winrt::Windows::Web::Http::HttpClient m_http{ nullptr };
         HANDLE m_job = nullptr;
         HANDLE m_process = nullptr;
@@ -262,5 +397,11 @@ namespace wm::app
         /// Written on the UI thread when the library loads, read on the request
         /// thread for every cache touch.
         std::atomic_int32_t m_librarySize{ -1 };
+
+        /// Session memo of the timelines already fetched (cap keeps a long
+        /// listening session from growing it without bound).
+        std::map<std::wstring, TrackTimeline> m_timelines;
+        mutable std::mutex m_timelineMutex;
+        static constexpr std::size_t kTimelineMax = 40;
     };
 } // namespace wm::app

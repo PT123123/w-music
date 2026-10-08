@@ -251,6 +251,11 @@ namespace wm::app
 
     void RecommendService::InvalidateCache()
     {
+        {
+            std::lock_guard lock{ m_timelineMutex };
+            // 分析曲库之后，内存里那些曲线描述的是旧算法的分段，不能接着画。
+            m_timelines.clear();
+        }
         std::lock_guard lock{ m_cacheMutex };
         m_cache.Clear();
         EnsureDataDirectory();
@@ -258,6 +263,422 @@ namespace wm::app
         if (!m_cache.Save(Utf8(CachePath()), &error))
         {
             Diag(std::string{ "rec cache clear failed: " } + error);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // per-track structure timeline (GET /v1/analysis)
+    // -----------------------------------------------------------------------
+
+    namespace
+    {
+        /// Percent-encode one query value. A library path carries spaces,
+        /// backslashes and Chinese file names, and Windows.Web.Http hands the
+        /// query string to the socket exactly as it was given to it.
+        std::wstring EncodeQuery(std::wstring_view value)
+        {
+            static wchar_t const* kHex = L"0123456789ABCDEF";
+            std::string const utf8 = Utf8(value);
+            std::wstring out;
+            out.reserve(utf8.size());
+            for (unsigned char const c : utf8)
+            {
+                if (isalnum(c) != 0 || c == '-' || c == '.' || c == '_' || c == '~')
+                {
+                    out += static_cast<wchar_t>(c);
+                }
+                else
+                {
+                    out += L'%';
+                    out += kHex[(c >> 4) & 0xFu];
+                    out += kHex[c & 0xFu];
+                }
+            }
+            return out;
+        }
+
+        double NumOf(wm::core::json::Value const* value)
+        {
+            return value != nullptr && value->isNumber() ? value->asNumber() : 0.0;
+        }
+
+        double ConfOf(wm::core::json::Value const* value)
+        {
+            return std::clamp(NumOf(value), 0.0, 1.0);
+        }
+
+        std::wstring TextOf(wm::core::json::Value const* value, wchar_t const* fallback)
+        {
+            return value != nullptr && value->isString() ? std::wstring{ Utf16(value->asString()) }
+                                                         : std::wstring{ fallback };
+        }
+
+        bool BoolOf(wm::core::json::Value const* value)
+        {
+            if (value == nullptr)
+            {
+                return false;
+            }
+            return value->isBool() ? value->asBool() : value->asNumber() != 0.0;
+        }
+
+        /// 界面真的印出来的那些代理量，需要引擎自己那句「它实际测的是什么」。
+        /// 没在界面上出现的字段就别拿注解占地方。
+        char const* const kNotedFields[] = {
+            "onset_density", "vocal_ratio", "vocal_gender", "bass_energy_ratio",
+            "drum_energy_ratio", "segment_type_sequence", "energy_curve", "confidence",
+        };
+    } // namespace
+
+    TrackTimeline RecommendService::ParseTimeline(std::wstring_view jsonText, std::wstring filePath,
+                                                  hstring const& engineError)
+    {
+        TrackTimeline tl;
+        tl.filePath = std::move(filePath);
+
+        if (jsonText.empty())
+        {
+            // The handshake/HTTP reason is more specific than our guess, so use
+            // it when there is one.
+            tl.note = engineError.empty()
+                ? std::wstring{ L"引擎没有这首歌的分析（文件不在曲库里，或还没分析）。" }
+                : std::wstring{ engineError };
+            return tl;
+        }
+
+        auto parsed = wm::core::json::Parse(Utf8(jsonText));
+        if (!parsed)
+        {
+            tl.note = L"引擎的结构分析回答读不懂。";
+            return tl;
+        }
+
+        tl.duration = NumOf(parsed->Find("duration_seconds"));
+        if (auto const* stale = parsed->Find("stale"); stale != nullptr)
+        {
+            tl.stale = stale->asBool();
+        }
+        // 同一份回答里的 track_id 是下一次请求（拿标量列）的钥匙。
+        tl.analysis.engineTrackId = TextOf(parsed->Find("track_id"), L"");
+        tl.analysis.scope = TextOf(parsed->Find("analysis_scope"), L"");
+        tl.analysis.fullTrack = tl.analysis.scope == L"full_track";
+
+        // The engine's own second grid is the only curve worth drawing: the
+        // legacy 64-value energy_curve has no time axis and cannot be placed
+        // on a timeline at all.
+        if (auto const* dyn = parsed->Find("dynamics"); dyn != nullptr)
+        {
+            auto const* times = dyn->Find("time_seconds");
+            auto const* norm = dyn->Find("rms_norm");
+            if (times != nullptr && times->isArray() && norm != nullptr && norm->isArray())
+            {
+                auto const& ts = times->asArray();
+                auto const& rs = norm->asArray();
+                std::size_t const n = std::min(ts.size(), rs.size());
+                tl.curveTimes.reserve(n);
+                tl.curve.reserve(n);
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    tl.curveTimes.push_back(ts[i].asNumber());
+                    tl.curve.push_back(std::clamp(rs[i].asNumber(), 0.0, 1.0));
+                }
+            }
+            // 曲线的尺度由引擎自己声明：单位、平均电平、电平范围、每格几秒，
+            // 以及「这个代理量不是什么」那几句注解——界面照抄，不另猜尺度。
+            if (auto const* meta = dyn->Find("meta"); meta != nullptr && meta->isObject())
+            {
+                tl.levelMeanDb = NumOf(meta->Find("level_mean_db"));
+                tl.levelRangeDb = NumOf(meta->Find("level_range_db"));
+                tl.curveInterval = NumOf(meta->Find("interval_seconds"));
+                tl.curveUnit = TextOf(meta->Find("rms_db_unit"), L"");
+                if (auto const* notes = meta->Find("notes"); notes != nullptr && notes->isArray())
+                {
+                    for (auto const& row : notes->asArray())
+                    {
+                        if (row.isString() && !row.asString().empty())
+                        {
+                            tl.curveNotes.push_back(Utf16(row.asString()));
+                        }
+                    }
+                }
+            }
+            // 事件的时间戳只有全曲分析才配放进全曲时间轴：旧版行带的是最响的 45 秒
+            // 窗口里的相对偏移（实测本机旧行 8 段铺在 0–45 秒，而 duration_seconds 是
+            // 190 秒），画到全曲轴上就是把窗口的形状冒充成这首歌的形状。
+            if (auto const* evs = dyn->Find("events");
+                tl.analysis.fullTrack && evs != nullptr && evs->isArray())
+            {
+                for (auto const& row : evs->asArray())
+                {
+                    DynamicsEvent ev;
+                    ev.time = NumOf(row.Find("time"));
+                    ev.type = TextOf(row.Find("type"), L"");
+                    ev.confidence = ConfOf(row.Find("confidence"));
+                    if (auto const* why = row.Find("evidence"); why != nullptr && why->isArray())
+                    {
+                        bool first = true;
+                        for (auto const& w : why->asArray())
+                        {
+                            if (!w.isString())
+                            {
+                                continue;
+                            }
+                            ev.evidence += (first ? L"" : L" · ");
+                            ev.evidence += Utf16(w.asString());
+                            first = false;
+                        }
+                    }
+                    if (!ev.type.empty())
+                    {
+                        tl.events.push_back(std::move(ev));
+                    }
+                }
+            }
+        }
+        if (auto const* segs = parsed->Find("segments");
+            tl.analysis.fullTrack && segs != nullptr && segs->isArray())
+        {
+            for (auto const& row : segs->asArray())
+            {
+                TimelineSegment s;
+                s.start = NumOf(row.Find("start"));
+                s.end = NumOf(row.Find("end"));
+                if (s.end <= s.start)
+                {
+                    continue;
+                }
+                s.label = TextOf(row.Find("label"), L"unknown");
+                s.group = TextOf(row.Find("group"), L"");
+                s.boundaryConfidence = ConfOf(row.Find("boundary_confidence"));
+                s.labelConfidence = ConfOf(row.Find("label_confidence"));
+                tl.segments.push_back(std::move(s));
+            }
+        }
+
+        // 段落序列和重复分组在两份载荷里都有，走这一份，标量列再补一次请求。
+        tl.analysis.segmentTypeSequence = TextOf(parsed->Find("segment_type_sequence"), L"");
+        tl.analysis.groupSequence = TextOf(parsed->Find("group_sequence"), L"");
+
+        // x 轴不能只信 duration_seconds：那是容器声明的秒数，剪掉尾部静音、解码精度
+        // 都可能让它比真实音频短，曲线最后几格和段落会画出界。
+        double axis = tl.duration;
+        if (tl.curveTimes.size() > 1)
+        {
+            double const halfBucket = (tl.curveTimes[1] - tl.curveTimes[0]) * 0.5;
+            axis = std::max(axis, tl.curveTimes.back() + halfBucket);
+        }
+        for (auto const& s : tl.segments)
+        {
+            axis = std::max(axis, s.end);
+        }
+        if (axis > 0.0)
+        {
+            tl.duration = axis;
+        }
+
+        if (tl.curve.empty())
+        {
+            // A row written before the full-track pass exists but has no curve.
+            tl.note = L"这首歌还是旧版分析，没有全曲响度曲线；在「个性推荐」页重新分析曲库后有。";
+            return tl;
+        }
+
+        tl.ok = true;
+        std::vector<std::wstring> caveats;
+        if (tl.stale)
+        {
+            caveats.push_back(L"这条曲线由旧版算法算出，重新分析曲库后才是最新的");
+        }
+        if (tl.segments.empty())
+        {
+            caveats.push_back(L"引擎在这首歌里没找到站得住的段落边界，所以只有响度");
+        }
+        else
+        {
+            bool anyLabel = false;
+            for (auto const& s : tl.segments)
+            {
+                if (s.label != L"unknown")
+                {
+                    anyLabel = true;
+                    break;
+                }
+            }
+            if (!anyLabel)
+            {
+                caveats.push_back(L"段落已按音色聚出（重复的段落同色），但没能命名");
+            }
+        }
+        for (std::size_t i = 0; i < caveats.size(); ++i)
+        {
+            tl.note += caveats[i] + (i + 1 == caveats.size() ? L"。" : L"；");
+        }
+        return tl;
+    }
+
+    void RecommendService::MergeAnalysisRow(TrackTimeline& tl, std::wstring_view rowJson,
+                                            hstring const& engineError)
+    {
+        TrackAnalysis& a = tl.analysis;
+        if (rowJson.empty())
+        {
+            // 标量列拿不到不影响曲线：界面少一行，note 已经有了。
+            Diag("rec analysis row empty: " + Utf8(engineError));
+            return;
+        }
+
+        auto parsed = wm::core::json::Parse(Utf8(rowJson));
+        if (!parsed)
+        {
+            Diag("rec analysis row unreadable");
+            return;
+        }
+
+        a.ok = true;
+        if (a.engineTrackId.empty())
+        {
+            a.engineTrackId = TextOf(parsed->Find("track_id"), L"");
+        }
+        a.bpm = NumOf(parsed->Find("bpm"));
+        a.beatConsistency = ConfOf(parsed->Find("beat_consistency"));
+        a.danceability = ConfOf(parsed->Find("danceability"));
+        a.onsetDensity = NumOf(parsed->Find("onset_density"));
+        a.key = TextOf(parsed->Find("key"), L"");
+        a.mode = TextOf(parsed->Find("mode"), L"");
+        a.chordSequence = TextOf(parsed->Find("chord_sequence"), L"");
+        a.chorusChordSequence = TextOf(parsed->Find("chorus_chord_sequence"), L"");
+        a.harmonicRhythm = NumOf(parsed->Find("harmonic_rhythm"));
+        a.dissonance = NumOf(parsed->Find("dissonance_mean"));
+        a.dynamicRange = NumOf(parsed->Find("dynamic_range"));
+        a.crestFactor = NumOf(parsed->Find("crest_factor"));
+        a.rmsMean = NumOf(parsed->Find("rms_mean"));
+        a.hasVocal = BoolOf(parsed->Find("has_vocal"));
+        a.vocalRatio = NumOf(parsed->Find("vocal_ratio"));
+        a.vocalGender = TextOf(parsed->Find("vocal_gender"), L"");
+        a.lowBandRatio = NumOf(parsed->Find("bass_energy_ratio"));
+        a.drumRatio = NumOf(parsed->Find("drum_energy_ratio"));
+        a.spectralCentroid = NumOf(parsed->Find("spectral_centroid_mean"));
+        if (a.segmentTypeSequence.empty())
+        {
+            a.segmentTypeSequence = TextOf(parsed->Find("segment_type_sequence"), L"");
+        }
+        if (a.groupSequence.empty())
+        {
+            a.groupSequence = TextOf(parsed->Find("group_sequence"), L"");
+        }
+        a.chorusRepeatCount = static_cast<int>(NumOf(parsed->Find("chorus_repeat_count")));
+        a.estimateFlags = TextOf(parsed->Find("estimate_flags"), L"");
+        if (a.scope.empty())
+        {
+            a.scope = TextOf(parsed->Find("analysis_scope"), L"");
+        }
+
+        // features_json 是文本列：这些数字究竟测在哪一段（analysis_window）、
+        // 低/中/高频比例、以及引擎那句「这个字段实际测的是什么」都藏在里面。
+        auto const* rowJsonText = parsed->Find("features_json");
+        if (rowJsonText != nullptr && rowJsonText->isString())
+        {
+            if (auto extra = wm::core::json::Parse(rowJsonText->asString()))
+            {
+                if (auto const* win = extra->Find("analysis_window");
+                    win != nullptr && win->isArray() && win->asArray().size() >= 2)
+                {
+                    a.windowStart = win->asArray()[0].asNumber();
+                    a.windowEnd = win->asArray()[1].asNumber();
+                }
+                a.lowEnergyRatio = NumOf(extra->Find("low_energy_ratio"));
+                a.midEnergyRatio = NumOf(extra->Find("mid_energy_ratio"));
+                a.highEnergyRatio = NumOf(extra->Find("high_energy_ratio"));
+                if (auto const* fm = extra->Find("field_meaning"); fm != nullptr && fm->isObject())
+                {
+                    for (auto const& key : kNotedFields)
+                    {
+                        if (auto const* note = fm->Find(key); note != nullptr && note->isString())
+                        {
+                            a.fieldNotes.push_back(Utf16(key) + L"：" + Utf16(note->asString()));
+                        }
+                    }
+                }
+            }
+        }
+        // analysis_scope 只在 /v1/analysis 里给：这一行没带回窗口信息时不改动它。
+        a.fullTrack = a.scope == L"full_track";
+    }
+
+    bool RecommendService::PeekTimeline(std::wstring_view filePath, TrackTimeline& out) const
+    {
+        if (filePath.empty())
+        {
+            return false;
+        }
+        std::lock_guard lock{ m_timelineMutex };
+        auto const it = m_timelines.find(std::wstring{ filePath });
+        // 只有标量、还没有全曲曲线的那一份也算命中：旧曲库重新分析之前，
+        // 每次回到这一页都不该再问引擎要两遍。
+        if (it == m_timelines.end() || (!it->second.ok && !it->second.analysis.ok))
+        {
+            return false;
+        }
+        out = it->second;
+        return true;
+    }
+
+    winrt::fire_and_forget RecommendService::RequestTimelineAsync(std::wstring filePath,
+                                                                 std::function<void(TrackTimeline)> done)
+    {
+        // One coroutine that cannot fault: a faulted fire-and-forget fail-fasts
+        // the process, and a timeline is not worth the app.
+        TrackTimeline tl;
+        tl.filePath = filePath;
+        try
+        {
+            // A curve is worth a request, not worth starting Python for. Users
+            // who never opened 个性推荐 get the honest reason instead of a
+            // background process.
+            if (!m_ready && !wm::app::Settings().RecommendPrewarm())
+            {
+                tl.note = L"结构分析要用本地推荐引擎；用过「个性推荐」页后这里会自动出曲线。";
+            }
+            else
+            {
+                co_await resume_background();
+                auto text = co_await CallAfterStartAsync(hstring{ L"GET" },
+                                                         L"/v1/analysis?file_path=" + EncodeQuery(filePath), {});
+                tl = ParseTimeline(text, filePath, m_lastError);
+                // 同一首歌的标量（BPM / 调性 / 和弦 / 人声占比）只在按 id 的行接口里，
+                // 而 id 就在刚才那份回答上。两次都是只读请求，一次会话每首只走一遍。
+                if (!tl.analysis.engineTrackId.empty())
+                {
+                    auto row = co_await CallAfterStartAsync(hstring{ L"GET" },
+                        L"/v1/tracks/" + EncodeQuery(tl.analysis.engineTrackId), {});
+                    MergeAnalysisRow(tl, row, m_lastError);
+                }
+                Diag("rec analysis segs=" + std::to_string(tl.segments.size())
+                     + " pts=" + std::to_string(tl.curve.size())
+                     + " events=" + std::to_string(tl.events.size())
+                     + " fullTrack=" + std::to_string(tl.analysis.fullTrack ? 1 : 0)
+                     + " row=" + std::to_string(tl.analysis.ok ? 1 : 0));
+                if (tl.ok || tl.analysis.ok)
+                {
+                    std::lock_guard lock{ m_timelineMutex };
+                    if (m_timelines.size() >= kTimelineMax && m_timelines.count(tl.filePath) == 0)
+                    {
+                        m_timelines.clear();
+                    }
+                    m_timelines[tl.filePath] = tl;
+                }
+            }
+        }
+        catch (...)
+        {
+            tl.ok = false;
+            tl.note = L"读取结构分析时出了异常（引擎可能未启动）。";
+        }
+
+        co_await wm::app::ResumeOnUi();
+        if (done)
+        {
+            done(std::move(tl));
         }
     }
 

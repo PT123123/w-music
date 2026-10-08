@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
   <PropertyGroup Label="Globals">
@@ -87,6 +87,7 @@
     <ClInclude Include="App.h" />
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="Controls\SpectrumView.h" />
+    <ClInclude Include="Controls\StructureTimelineView.h" />
     <ClInclude Include="Audio\WasapiLoopback.h" />
     <ClInclude Include="Audio\EqualizedSource.h" />
     <ClInclude Include="Services\AppPaths.h" />
@@ -121,6 +122,7 @@
     <ClCompile Include="App.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="Controls\SpectrumView.cpp" />
+    <ClCompile Include="Controls\StructureTimelineView.cpp" />
     <ClCompile Include="Audio\WasapiLoopback.cpp" />
     <ClCompile Include="Audio\EqualizedSource.cpp" />
     <ClCompile Include="Services\AppPaths.cpp" />

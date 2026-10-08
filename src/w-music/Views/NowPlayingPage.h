@@ -3,6 +3,8 @@
 #include "NowPlayingPage.g.h"
 
 #include "Controls/SpectrumView.h"
+#include "Controls/StructureTimelineView.h"
+#include "Services/RecommendService.h"
 
 namespace winrt::w_music::implementation
 {
@@ -28,6 +30,24 @@ namespace winrt::w_music::implementation
         void OnFlowUpNextItemClick(winrt::Windows::Foundation::IInspectable const& sender,
                                    winrt::Microsoft::UI::Xaml::Controls::ItemClickEventArgs const& args);
         void OnModeClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+
+        // ---- 结构时间轴：全曲响度曲线 + 段落卡片 ----
+        void OnStructureTapped(winrt::Windows::Foundation::IInspectable const& sender,
+                               winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args);
+        void OnSegmentCardClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                                  winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        /// 换曲时向本地引擎要这一首的分析（有会话备忘就直接画，不再走网络）。
+        void SyncTimeline(std::wstring const& filePath);
+        void PaintTimeline(wm::app::TrackTimeline const& timeline);
+        void BuildSegmentCards(wm::app::TrackTimeline const& timeline);
+        /// 「本曲分析」：曲线尺度 + 动态事件 + 节奏/调性/和声/响度/配器标量。
+        void PaintAnalysis(wm::app::TrackTimeline const& timeline);
+        void BuildEventChips(wm::app::TrackTimeline const& timeline);
+        /// 把段落贴到每一句歌词上（左侧色条 + 段首标签）。歌词比分析晚到、
+        /// 或用户改了偏移时都要重贴一遍。
+        void AnnotateLyrics();
+        void OnEventChipClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                                winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnFavoriteClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnSlowerClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnFasterClicked(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -50,6 +70,7 @@ namespace winrt::w_music::implementation
 
         wm::app::SpectrumView m_spectrumView;
         std::size_t m_spectrumToken = 0;
+        winrt::event_token m_propertyToken{};
         bool m_updatingSlider = false;
         int32_t m_lastScrolled = -1;
 
@@ -57,6 +78,19 @@ namespace winrt::w_music::implementation
         winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_holdTimer{ nullptr };
         bool m_pointerDown = false;
         bool m_dragging = false;
+
+        // ---- 结构时间轴 ----
+        wm::app::StructureTimelineView m_timeline;
+        /// 已经画过（或正在等答案）的那一首文件路径：只在换曲时重取。
+        std::wstring m_timelinePath;
+        bool m_timelinePending = false;
+        /// 卡片序号 -> 段落起点（秒）；按钮 Tag 只装序号。
+        std::vector<double> m_segmentStarts;
+        /// 事件 chip 同理，序号 -> 事件时间（秒）。
+        std::vector<double> m_eventStarts;
+        /// 已经画在这一页上的分析：歌词常常比分析晚到一步（在线取词、读盘），
+        /// 到了一步就要照同一份段落重贴一次，不能等下一首歌。
+        wm::app::TrackTimeline m_painted;
     };
 }
 

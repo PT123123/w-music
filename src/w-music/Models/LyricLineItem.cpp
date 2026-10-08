@@ -85,6 +85,38 @@ namespace winrt::w_music::implementation
         if (m_index != value) { m_index = value; RaisePropertyChanged(L"Index"); }
     }
 
+    void LyricLineItem::SegmentTag(hstring const& value)
+    {
+        if (m_segmentTag == value)
+        {
+            return;
+        }
+        m_segmentTag = value;
+        RaisePropertyChanged(L"SegmentTag");
+        RaisePropertyChanged(L"HasSegmentTag");
+    }
+
+    void LyricLineItem::SegmentBar(winrt::Microsoft::UI::Xaml::Media::Brush const& value)
+    {
+        // 同一组的色条由页面缓存后重复递给每一行：指针没变就不通知界面。
+        if (m_segmentBar == value)
+        {
+            return;
+        }
+        m_segmentBar = value;
+        RaisePropertyChanged(L"SegmentBar");
+    }
+
+    void LyricLineItem::SegmentTagForeground(winrt::Microsoft::UI::Xaml::Media::Brush const& value)
+    {
+        if (m_segmentTagBrush == value)
+        {
+            return;
+        }
+        m_segmentTagBrush = value;
+        RaisePropertyChanged(L"SegmentTagForeground");
+    }
+
     hstring LyricLineItem::TimeText() const
     {
         const int64_t totalSeconds = m_timeMs / 1000;

@@ -26,6 +26,21 @@ namespace winrt::w_music::implementation
         winrt::Microsoft::UI::Xaml::Media::Brush Foreground() const noexcept { return m_foreground; }
         double FontSize() const noexcept { return m_fontSize; }
 
+        // ---- 本地引擎的结构分析：这一句落在哪一段里（页面贴上去的）----
+        hstring SegmentTag() const noexcept { return m_segmentTag; }
+        void SegmentTag(hstring const& value);
+        winrt::Microsoft::UI::Xaml::Visibility HasSegmentTag() const noexcept
+        {
+            return m_segmentTag.empty() ? winrt::Microsoft::UI::Xaml::Visibility::Collapsed
+                                        : winrt::Microsoft::UI::Xaml::Visibility::Visible;
+        }
+
+        winrt::Microsoft::UI::Xaml::Media::Brush SegmentBar() const noexcept { return m_segmentBar; }
+        void SegmentBar(winrt::Microsoft::UI::Xaml::Media::Brush const& value);
+
+        winrt::Microsoft::UI::Xaml::Media::Brush SegmentTagForeground() const noexcept { return m_segmentTagBrush; }
+        void SegmentTagForeground(winrt::Microsoft::UI::Xaml::Media::Brush const& value);
+
         winrt::event_token PropertyChanged(winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);
         void PropertyChanged(winrt::event_token const& token) noexcept { m_propertyChanged.remove(token); }
 
@@ -37,6 +52,9 @@ namespace winrt::w_music::implementation
         int32_t m_index = 0;
         bool m_isActive = false;
         double m_fontSize = 15.0;
+        hstring m_segmentTag;
+        winrt::Microsoft::UI::Xaml::Media::Brush m_segmentBar{ nullptr };
+        winrt::Microsoft::UI::Xaml::Media::Brush m_segmentTagBrush{ nullptr };
         winrt::Microsoft::UI::Xaml::Media::Brush m_foreground{ nullptr };
         winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
     };
