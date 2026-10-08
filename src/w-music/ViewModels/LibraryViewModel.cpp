@@ -224,7 +224,10 @@ namespace winrt::w_music::implementation
         }
         m_isScanning = true;
         RaisePropertyChanged(L"IsScanning");
-        SetStatus(hstring{ L"正在快速扫描本地音乐文件…" });
+        // The dialog is up before any file is read, and it may take the shell a
+        // while to come forward -- saying "scanning" here would be a lie that
+        // also hides whether the click reached the picker at all.
+        SetStatus(hstring{ L"请在弹出的窗口里选择音乐文件夹…" });
 
         const auto tracksBefore = wm::app::Library().Tracks().Size();
         int scanned = 0;
@@ -273,7 +276,13 @@ namespace winrt::w_music::implementation
         }
 
         co_await wm::app::ResumeOnUi();
-        if (error.empty())
+        if (scanned < 0)
+        {
+            // Picker closed without a folder: reporting "新增 0 首" here would
+            // read like a scan that found nothing.
+            SetStatus(hstring{ L"没有选择文件夹，曲库保持不变。" });
+        }
+        else if (error.empty())
         {
             RefreshDiscover();
             SetStatus(hstring{ L"新增 " + std::to_wstring(scanned) + L" 首歌曲，曲库共 " + std::to_wstring(m_trackCount) + L" 首" + note });

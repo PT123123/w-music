@@ -9,9 +9,11 @@
 
 #include <shobjidl.h>
 #include <shobjidl_core.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <exception>
 #include <random>
 #include <unordered_set>
 
@@ -177,7 +179,9 @@ namespace wm::app
         /// for an unpackaged process -- unlike the identity-bound WinRT types the
         /// picker used to sit on. Returns an empty string on cancel; throws the
         /// localized COM error when the dialog itself cannot be created.
-        std::wstring PickFolder(HWND hwnd)
+        /// Blocks the calling thread until the user answers, so it is only ever
+        /// called from the dedicated STA thread in PickFolderAsync.
+        std::wstring PickFolder(HWND hwnd, std::wstring const& initialFolder)
         {
             IFileOpenDialog* created = nullptr;
             winrt::check_hresult(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
@@ -188,6 +192,18 @@ namespace wm::app
             DWORD options = FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM;
             winrt::check_hresult(dialog->GetOptions(&options));
             winrt::check_hresult(dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM));
+
+            if (!initialFolder.empty())
+            {
+                IShellItem* createdFolder = nullptr;
+                if (SUCCEEDED(SHCreateItemFromParsingName(initialFolder.c_str(), nullptr,
+                                                          IID_PPV_ARGS(&createdFolder))))
+                {
+                    winrt::com_ptr<IShellItem> folder;
+                    folder.attach(createdFolder);
+                    dialog->SetFolder(folder.get());
+                }
+            }
 
             const HRESULT shown = dialog->Show(hwnd);
             if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED))
@@ -206,6 +222,97 @@ namespace wm::app
             const std::wstring path{ rawPath != nullptr ? rawPath : L"" };
             CoTaskMemFree(rawPath);
             return path;
+        }
+
+        /// Where the dialog opens: the newest remembered folder that is still on
+        /// disk, else the shell Music folder. Leaving it to the shell means
+        /// restoring its own last location, and an unplugged drive or a dead
+        /// network share there makes the redirect stall inside Show().
+        std::wstring PreferredStartFolder(std::vector<std::string> const& folders)
+        {
+            for (auto it = folders.rbegin(); it != folders.rend(); ++it)
+            {
+                std::wstring candidate = Utf16(*it);
+                std::error_code ec;
+                if (std::filesystem::is_directory(candidate, ec) && !ec)
+                {
+                    return candidate;
+                }
+            }
+
+            wchar_t* known = nullptr;
+            if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Music, 0, nullptr, &known)) && known != nullptr)
+            {
+                const std::wstring music{ known };
+                CoTaskMemFree(known);
+                std::error_code ec;
+                if (std::filesystem::is_directory(music, ec) && !ec)
+                {
+                    return music;
+                }
+            }
+            return {};
+        }
+
+        /// Shows the folder dialog on a dedicated STA thread and waits for it
+        /// without holding the XAML thread. Show() only pumps once the dialog is
+        /// up: CoCreateInstance, the last-location restore and the namespace
+        /// enumeration (plus every shell extension injected into this process)
+        /// run with no pump, so on the UI thread a stall there freezes the whole
+        /// window -- w-music 0.1.27 took a WER AppHangTransient with not a single
+        /// add-folder line in diag.log. tools\pick_thread_probe.cpp proves both
+        /// halves of this: a stalled owner thread services zero timer ticks, the
+        /// same stall on a worker thread leaves the owner pumping, and the dialog
+        /// still returns the picked folder when its owner lives on another thread.
+        IAsyncOperation<hstring> PickFolderAsync(HWND hwnd, std::wstring initialFolder)
+        {
+            struct State
+            {
+                std::wstring path;
+                std::exception_ptr error;
+                std::atomic_bool done{ false };
+            };
+            auto state = std::make_shared<State>();
+            const auto opened = GetTickCount64();
+
+            std::thread([state, hwnd, folder = std::move(initialFolder)] {
+                const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+                try
+                {
+                    state->path = PickFolder(hwnd, folder);
+                }
+                catch (...)
+                {
+                    state->error = std::current_exception();
+                }
+                if (SUCCEEDED(init))
+                {
+                    CoUninitialize();
+                }
+                state->done.store(true, std::memory_order_release);
+            }).detach();
+
+            Diag("pick: dialog opening");
+            bool warned = false;
+            while (!state->done.load(std::memory_order_acquire))
+            {
+                co_await winrt::resume_after(std::chrono::milliseconds{ 50 });
+                if (!warned && GetTickCount64() - opened >= 5000)
+                {
+                    warned = true;
+                    Diag("pick: dialog not answered after 5s");
+                }
+            }
+
+            const auto waited = GetTickCount64() - opened;
+            if (state->error)
+            {
+                Diag("pick: dialog failed after " + std::to_string(waited) + "ms");
+                std::rethrow_exception(state->error);
+            }
+            Diag("pick: dialog answered after " + std::to_string(waited) + "ms path=" +
+                 (state->path.empty() ? "<cancelled>" : Utf8(state->path)));
+            co_return hstring{ state->path };
         }
     } // namespace
 
@@ -531,12 +638,17 @@ namespace wm::app
         ScanGuard guard(m_scanInProgress);
 
         // A plain shell folder dialog, not Windows.Storage.Pickers.FolderPicker:
-        // that one is an application-identity API and the app is unpackaged.
+        // that one is an application-identity API and the app is unpackaged. It
+        // runs on its own thread, and the store is only touched after the hop
+        // back -- the dialog can stall for as long as the shell likes.
         const HWND hwnd = winrt::Microsoft::UI::GetWindowFromWindowId(windowId);
-        const std::wstring path = PickFolder(hwnd);
+        const hstring picked = co_await PickFolderAsync(hwnd, PreferredStartFolder(m_store.Data().scanFolders));
+        co_await wm::app::ResumeOnUi();
+        const std::wstring path{ picked.c_str(), picked.size() };
         if (path.empty())
         {
-            co_return 0;
+            Diag("add-folder: picker closed without a folder");
+            co_return -1;
         }
 
         // Remember (and persist) the folder before scanning so that even a
@@ -549,7 +661,9 @@ namespace wm::app
                 m_store.Data().scanFolders.push_back(reference);
             }
         }
+        const auto recorded = GetTickCount64();
         Save();
+        Diag("add-folder recorded save_ms=" + std::to_string(GetTickCount64() - recorded));
 
         // ApplyTrackBatch keeps the bound collection in step with each batch, so
         // there is no rebuild - and no second persist - after the scan.

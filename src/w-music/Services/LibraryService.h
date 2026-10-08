@@ -34,6 +34,8 @@ namespace wm::app
 
         // ---- folders ----
         /// Shows the folder picker, remembers the folder, and scans it.
+        /// Returns the number of files handled, or -1 when the dialog was closed
+        /// without picking a folder (nothing was added).
         winrt::Windows::Foundation::IAsyncOperation<int> PickAndAddFolderAsync(
             winrt::Microsoft::UI::WindowId windowId,
             std::function<void(int)> progress = {});
