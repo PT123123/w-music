@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn the RVAs from a diag.log AV / CRASH line back into function names.
+"""Turn the RVAs from a diag.log fault line back into function names.
 
 w-music ships no PDB, so the in-process crash logger (wm::app::InstallCrashLogger)
 can only record offsets. tools\\dev-build.ps1 links the app with /MAP, so the
@@ -7,6 +7,13 @@ matching build\\w-music.map resolves them:
 
     python tools/crash_symbols.py                  # fault events in diag.log
     python tools/crash_symbols.py +1a2b3 +2b4c5    # explicit RVAs
+
+A process that dies silently leaves no fault line at all; the fastest offset is
+the "Application Error" (id 1000) event in the Application log, whose 故障偏移 is
+already an RVA into the exe:
+
+    powershell -Command "Get-WinEvent -FilterHashtable @{LogName='Application'} |
+      Where-Object { $_.Id -eq 1000 } | Select-Object -First 1 -ExpandProperty Message"
 
 Only events whose `ts=` matches the map's link timestamp are resolved: RVAs from
 an older build would otherwise come back as confident nonsense.
@@ -20,7 +27,7 @@ import sys
 MAP_LINE = re.compile(r"^\s+[0-9A-Fa-f]{4}:[0-9A-Fa-f]{8}\s+(\S+)\s+([0-9A-Fa-f]{8,16})\b")
 TIMESTAMP = re.compile(r"^\s*Timestamp is ([0-9A-Fa-f]{8})")
 LOAD_BASE = re.compile(r"^\s*Preferred load address is ([0-9A-Fa-f]{8,16})")
-FAULT_HEAD = re.compile(r"\b(AV|CRASH)\b.*?\bts=([0-9a-fA-F]{8})")
+FAULT_HEAD = re.compile(r"\b(AV|CRASH|EH1|WT1|NC1|STOWED)\b.*?\bts=([0-9a-fA-F]{8})")
 RVA = re.compile(r"\+([0-9a-fA-F]{3,8})\b")
 
 

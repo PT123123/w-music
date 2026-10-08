@@ -49,8 +49,14 @@ namespace wm::app
         DWORD g_imageSize = 0;
         DWORD g_peTimestamp = 0;
         LPTOP_LEVEL_EXCEPTION_FILTER g_previousFilter = nullptr;
-        std::atomic<bool> g_inFaultHandler{ false };
+        thread_local bool t_inFaultHandler{ false };
         std::atomic<int> g_avCount{ 0 };
+        // Separate budget for the first-chance noise (C++ throws the app raises
+        // and swallows on purpose). Sharing one counter with the AV branch means
+        // a busy startup -- the engine health check throws a handful of times --
+        // spends the AV quota before the fault that actually kills the process
+        // arrives, and diag.log ends with no crash line at all.
+        std::atomic<int> g_noiseCount{ 0 };
         std::atomic<bool> g_crashLogged{ false };
         ULONG_PTR g_vectorCookie = 0;
 
@@ -118,14 +124,26 @@ namespace wm::app
         /// Writes "<tag> code=.. rip=+RVA fault=.." plus a scan of the faulting
         /// thread's stack. Win32 file API only, and never re-entered by a fault
         /// inside itself (that would loop until the stack is gone).
+        ///
+        /// The guard is thread-local: the only recursion that matters is a fault
+        /// inside this function on the same thread, while a *global* flag made
+        /// concurrent faults from other threads drop their line instead -- which
+        /// is how the 0.1.25 UpdateTransport access violation ended up with no
+        /// trace in diag.log at all (the engine's first-chance throws were
+        /// already logging on worker threads when the UI thread died).
+        /// CrashAppend needs no lock: FILE_APPEND_DATA writes are atomic.
         void LogFault(char const* tag, EXCEPTION_POINTERS* info)
         {
-            bool expected = false;
-            if (!g_inFaultHandler.compare_exchange_strong(expected, true))
+            if (t_inFaultHandler)
             {
                 CrashAppend("CRASH reentrant while logging a previous fault\n");
                 return;
             }
+            t_inFaultHandler = true;
+            struct release_guard
+            {
+                ~release_guard() { t_inFaultHandler = false; }
+            } const guard;
 
             char line[1024]{};
             const auto* record = info != nullptr ? info->ExceptionRecord : nullptr;
@@ -198,8 +216,6 @@ namespace wm::app
                 stackText[pos++] = '\n';
                 CrashAppend({ stackText, static_cast<std::size_t>(pos) });
             }
-
-            g_inFaultHandler.store(false, std::memory_order_release);
         }
 
         /// Vectored, first in line. The top-level filter alone is not enough: in
@@ -220,7 +236,7 @@ namespace wm::app
             const DWORD code = record->ExceptionCode;
             if (code == static_cast<DWORD>(STATUS_ACCESS_VIOLATION))
             {
-                if (g_avCount.fetch_add(1) < 4)
+                if (g_avCount.fetch_add(1) < 12)
                 {
                     LogFault("AV", info);
                 }
@@ -233,15 +249,15 @@ namespace wm::app
             // Log the first few with a stack scan; the .map of the same link
             // names the throw site. Caps keep legitimate raise-and-swallow
             // traffic (HTTP failures, engine cooldowns) from flooding diag.log.
-            if (code == 0xE06D7363u && g_avCount.fetch_add(1) < 16)
+            if (code == 0xE06D7363u && g_noiseCount.fetch_add(1) < 16)
             {
                 LogFault("EH1", info);
             }
-            else if (code == 0x8001010Eu && g_avCount.fetch_add(1) < 8)
+            else if (code == 0x8001010Eu && g_noiseCount.fetch_add(1) < 8)
             {
                 LogFault("WT1", info);
             }
-            else if (code == 0x80040154u && g_avCount.fetch_add(1) < 8)
+            else if (code == 0x80040154u && g_noiseCount.fetch_add(1) < 8)
             {
                 LogFault("NC1", info);
             }
