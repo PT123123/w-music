@@ -34,6 +34,16 @@ namespace winrt::w_music::implementation
         // ---- 结构时间轴：全曲响度曲线 + 段落卡片 ----
         void OnStructureTapped(winrt::Windows::Foundation::IInspectable const& sender,
                                winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args);
+        /// 曲线切换：电平 / 起音率 / 低频比例 / 亮度 / 谱变化。
+        void BuildCurveChips(wm::app::TrackTimeline const& timeline);
+        void HighlightCurveChip();
+        void UpdateCurveUnitText();
+        void OnCurveChipClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                                winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        /// 结构卡片上的「生成分析」：让引擎扫描曲库，完成后重取本曲的时间轴。
+        void OnStructureAnalyzeClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                                       winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        winrt::fire_and_forget AnalyzeForStructureAsync();
         void OnSegmentCardClicked(winrt::Windows::Foundation::IInspectable const& sender,
                                   winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         /// 换曲时向本地引擎要这一首的分析（有会话备忘就直接画，不再走网络）。
@@ -84,6 +94,11 @@ namespace winrt::w_music::implementation
         /// 已经画过（或正在等答案）的那一首文件路径：只在换曲时重取。
         std::wstring m_timelinePath;
         bool m_timelinePending = false;
+        /// 当前显示的曲线序号（m_painted.curves 里）；换曲归零回电平。
+        std::size_t m_activeCurve = 0;
+        /// 本次页面生命周期里是否已经后台预热过引擎（结构卡片一出现就拉起，
+        /// 免得用户点「生成分析」时等十几秒的 Python 冷启动）。
+        bool m_prewarmKicked = false;
         /// 卡片序号 -> 段落起点（秒）；按钮 Tag 只装序号。
         std::vector<double> m_segmentStarts;
         /// 事件 chip 同理，序号 -> 事件时间（秒）。

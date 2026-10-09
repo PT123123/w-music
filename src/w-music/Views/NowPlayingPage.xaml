@@ -126,16 +126,41 @@
                     Visibility="Collapsed">
                 <StackPanel Spacing="6">
                     <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock Text="结构" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button x:Name="StructureAnalyzeBtn"
+                                Grid.Column="1"
+                                Content="生成分析"
+                                FontSize="11"
+                                Padding="8,2"
+                                CornerRadius="8"
+                                Margin="8,0,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                ToolTipService.ToolTip="让本地引擎只分析当前这首歌（几秒到十几秒），完成后重画曲线和段落；整个曲库的逐首分析在「个性推荐」页" />
                         <TextBlock x:Name="StructureStateText"
+                                   Grid.Column="2"
                                    Text=""
                                    FontSize="11"
                                    Opacity="0.6"
-                                   VerticalAlignment="Center"
-                                   HorizontalAlignment="Right" />
+                                   VerticalAlignment="Center" />
                     </Grid>
 
                     <Canvas x:Name="StructureCanvas" Height="64" Background="Transparent" />
+
+                    <!-- 曲线切换：引擎给出多条曲线（电平 / 起音率 / 低频比例 / 亮度 /
+                         谱变化），点小字切换；每个尺度按自身范围显示，真实单位在下一行。 -->
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="4"
+                                x:Name="CurveChips" />
+                    <TextBlock x:Name="CurveUnitText"
+                               FontSize="10.5"
+                               Opacity="0.55"
+                               TextWrapping="Wrap" />
 
                     <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                   VerticalScrollBarVisibility="Disabled"
@@ -185,6 +210,9 @@
                     <TextBlock x:Name="AnalysisLoudnessText" FontSize="11.5" Opacity="0.8" TextWrapping="Wrap" />
                     <TextBlock x:Name="AnalysisTextureText" FontSize="11.5" Opacity="0.8" TextWrapping="Wrap" />
                     <TextBlock x:Name="AnalysisStructureText" FontSize="11.5" Opacity="0.8" TextWrapping="Wrap" />
+                    <!-- 引擎描述层（v5）：纹理/空间/律动/轮廓的确定性中文描述，
+                         每句可追溯到测量字段；旧引擎回答为空。 -->
+                    <TextBlock x:Name="AnalysisProfileText" FontSize="11.5" Opacity="0.8" TextWrapping="Wrap" />
 
                     <TextBlock x:Name="AnalysisNoteText" FontSize="10.5" Opacity="0.5" TextWrapping="Wrap" />
                 </StackPanel>
@@ -195,7 +223,7 @@
                  下一首；随机模式明确说"不预告"。 -->
             <Border Grid.Row="3"
                     x:Name="FlowCard"
-                    Margin="0,12,0,0"
+                    Margin="0,28,0,0"
                     Padding="14,10,14,10"
                     CornerRadius="12"
                     Background="{ThemeResource WmCardBrush}"

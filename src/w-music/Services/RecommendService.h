@@ -126,6 +126,21 @@ namespace wm::app
         double windowEnd = 0.0;
     };
 
+    /// 一条可以切到时间轴上显示的分析曲线（电平 / 起音率 / 低频比例 / 亮度 /
+    /// 谱变化…）。通用结构而不是每种曲线一组成员：引擎加曲线时这边不用跟着改。
+    /// 缺失的曲线根本不会出现在列表里——缺失不是零，零有可能是真实测量结果。
+    struct AnalysisCurve
+    {
+        std::wstring id;
+        std::wstring unit;
+        std::wstring meaning;
+        std::wstring scope;
+        std::vector<double> times;
+        std::vector<double> values;
+        /// 对应点位是否可信；不可信的点画图时跳过，不补零。
+        std::vector<bool> valid;
+    };
+
     /// The full-track dynamics curve plus its sections, for the now-playing
     /// timeline. Plain C++ on purpose: a few thousand buckets boxed into WinRT
     /// vectors would cost more than the drawing.
@@ -140,6 +155,9 @@ namespace wm::app
         /// normalized loudness at each -- never a 64-value blob without an axis.
         std::vector<double> curveTimes;
         std::vector<double> curve;
+        /// 引擎声明可切换的全部曲线（level_db 在第一位时是默认显示）；
+        /// 旧引擎回答没有 curves 块时由 ParseTimeline 从 legacy 字段合成。
+        std::vector<AnalysisCurve> curves;
         std::vector<TimelineSegment> segments;
         std::vector<DynamicsEvent> events;
         /// What the curve's numbers mean: the engine's own dBFS scale, its average
@@ -149,6 +167,9 @@ namespace wm::app
         double curveInterval = 0.0;
         std::wstring curveUnit;
         std::vector<std::wstring> curveNotes;
+        /// 引擎描述层的确定性中文描述（纹理/空间/律动/轮廓逐句可追溯）；
+        /// 空模块时为空串。v5 引擎回答才有。
+        std::wstring profileText;
         /// The scalar columns of the same row (GET /v1/tracks/{id}).
         TrackAnalysis analysis;
         /// What the answer is worth: engine unavailable, file not indexed,
@@ -287,12 +308,31 @@ namespace wm::app
         /// POST /v1/feed/reset?scope=all.
         winrt::Windows::Foundation::IAsyncAction ResetTasteAsync();
 
-        /// POST /v1/library/scan for each folder of the w-music library, then
-        /// rebuild embeddings + FAISS (the endpoint does that in one shot).
-        /// First analysis of a large folder takes minutes; unchanged files are
-        /// skipped by the engine on later runs. Returns a one-line summary.
+        /// Per-track library analysis: for every track the caller lists (mp3 /
+        /// wav only; the rest are filtered out), ask the engine what it already
+        /// has (GET /v1/analysis) and index the rest one by one
+        /// (POST /v1/tracks/index), so the UI can show "第 i / N 首：文件名".
+        /// Afterwards one incremental /v1/library/scan per folder rebuilds the
+        /// embeddings + FAISS the recommendation side needs (every file is
+        /// already analysed by then, so the scan itself is cheap). |progress|
+        /// (optional) is called from a background thread at each step; the
+        /// callee is responsible for marshaling to the UI. Returns a summary.
         winrt::Windows::Foundation::IAsyncOperation<hstring>
-            AnalyzeFoldersAsync(std::vector<std::wstring> folders);
+            AnalyzeLibraryAsync(std::vector<std::wstring> trackPaths,
+                                std::vector<std::wstring> folders,
+                                std::function<void(hstring const&)> progress = {});
+
+        /// Analyze exactly one track for the structure card: start the engine
+        /// on demand, leave tracks that already carry a full curve untouched,
+        /// and POST /v1/tracks/index for the rest. The structure view only
+        /// ever needs the song that is playing, so it never scans the whole
+        /// folder here -- the full-library pass lives on 个性推荐. Returns an
+        /// error text; empty on success.
+        winrt::Windows::Foundation::IAsyncOperation<hstring> AnalyzeTrackAsync(std::wstring filePath);
+
+        /// Drop the session-cached timeline for one file so the next
+        /// PeekTimeline re-asks the engine (after a fresh per-track analysis).
+        void ForgetTimeline(std::wstring const& filePath);
 
         /// GET /v1/feed/state -> one-line short/medium/long interest summary
         /// for the status strip. Returns an error text on failure.

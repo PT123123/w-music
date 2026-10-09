@@ -431,8 +431,17 @@ namespace winrt::w_music::implementation
     IAsyncAction RecommendViewModel::AnalyzeLibraryAsync()
     {
         SetWaiting(true);
-        SetStatus(hstring{ L"正在分析本地曲库（首次可能需要几分钟，完成后自动刷新）…" });
-        auto summary = co_await wm::app::Recommend().AnalyzeFoldersAsync(wm::app::Library().FolderPaths());
+        SetStatus(hstring{ L"正在分析本地曲库（逐首进行，完成后自动刷新）…" });
+        std::vector<std::wstring> tracks;
+        for (auto const& track : wm::app::Library().Tracks())
+        {
+            if (track != nullptr)
+            {
+                tracks.push_back(std::wstring{ track.FilePath() });
+            }
+        }
+        auto summary = co_await wm::app::Recommend().AnalyzeLibraryAsync(
+            std::move(tracks), wm::app::Library().FolderPaths());
         co_await wm::app::ResumeOnUi();
         SetStatus(summary);
         SetWaiting(false);

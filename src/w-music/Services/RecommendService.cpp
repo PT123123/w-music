@@ -24,6 +24,13 @@ namespace wm::app
         /// The engine's README recommends --workers 6 for real libraries.
         constexpr int ScanWorkers = 6;
 
+        /// Whole-library per-track analysis runs in installments: after every
+        /// |AnalyzeBatchSize| tracks the stage drops back to Ready for
+        /// |AnalyzeBatchPause| so feed refills / structure fetches can squeeze
+        /// through, and the wait is never one endless block.
+        constexpr std::size_t AnalyzeBatchSize = 8;
+        constexpr std::chrono::milliseconds AnalyzeBatchPause{ 2000 };
+
         /// Unix milliseconds -- what the disk cache timestamps its entries with.
         std::int64_t NowMs()
         {
@@ -328,6 +335,152 @@ namespace wm::app
             "onset_density", "vocal_ratio", "vocal_gender", "bass_energy_ratio",
             "drum_energy_ratio", "segment_type_sequence", "energy_curve", "confidence",
         };
+
+        /// The engine only ever indexes .mp3/.wav (flac etc. stay w-music-only),
+        /// so per-track indexing must not even try the other extensions.
+        bool EngineSupportedAudio(std::wstring const& path)
+        {
+            auto const dot = path.find_last_of(L'.');
+            if (dot == std::wstring::npos)
+            {
+                return false;
+            }
+            std::wstring ext = path.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](wchar_t c) { return static_cast<wchar_t>(::towlower(c)); });
+            return ext == L".mp3" || ext == L".wav";
+        }
+
+        /// 文件名去掉目录和扩展名：进度行上只显示《歌名》，别把整条路径糊上去。
+        std::wstring TrackDisplayName(std::wstring const& path)
+        {
+            auto const slash = path.find_last_of(L"\\/");
+            std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+            auto const dot = name.find_last_of(L'.');
+            if (dot != std::wstring::npos)
+            {
+                name.resize(dot);
+            }
+            return name;
+        }
+
+        /// 引擎里是否已经有这首歌的当前版本全曲分析：GET /v1/analysis 只读库，
+        /// 有 dynamics 全曲曲线且不是旧版（stale）就算数。
+        bool HasFullCurve(wm::core::json::Value const& parsed)
+        {
+            if (auto const* stale = parsed.Find("stale"); stale != nullptr && BoolOf(stale))
+            {
+                return false;
+            }
+            auto const* dyn = parsed.Find("dynamics");
+            if (dyn == nullptr)
+            {
+                return false;
+            }
+            auto const* times = dyn->Find("time_seconds");
+            auto const* norm = dyn->Find("rms_norm");
+            return times != nullptr && times->isArray() && !times->asArray().empty() &&
+                   norm != nullptr && norm->isArray() && !norm->asArray().empty();
+        }
+
+        /// 通用曲线数组解析：逐点校验（有限值、时间不倒退），坏点标 valid=false
+        /// 交给画图跳过（不补零——零可能是真实测量值），大半都坏的曲线整条丢。
+        bool ParseCurvePoints(wm::core::json::Value const& c, wm::app::AnalysisCurve& out)
+        {
+            auto const* ts = c.Find("time_seconds");
+            auto const* vs = c.Find("values");
+            if (ts == nullptr || !ts->isArray() || vs == nullptr || !vs->isArray())
+            {
+                return false;
+            }
+            auto const& ta = ts->asArray();
+            auto const& va = vs->asArray();
+            std::size_t const n = std::min(ta.size(), va.size());
+            if (n < 2)
+            {
+                return false;
+            }
+            out.times.reserve(n);
+            out.values.reserve(n);
+            out.valid.assign(n, true);
+            double last = -1e300;
+            std::size_t good = 0;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                double const t = ta[i].isNumber() ? ta[i].asNumber() : std::numeric_limits<double>::quiet_NaN();
+                double const v = va[i].isNumber() ? va[i].asNumber() : std::numeric_limits<double>::quiet_NaN();
+                bool const ok = std::isfinite(t) && std::isfinite(v) && t >= last;
+                out.valid[i] = ok;
+                if (ok)
+                {
+                    last = t;
+                    ++good;
+                }
+                out.times.push_back(t);
+                out.values.push_back(v);
+            }
+            return good * 2 >= n;
+        }
+
+        /// 旧引擎回答（analysis_version 3 及更早）没有 curves 块：从 legacy
+        /// dynamics 字段合成同一套曲线，老数据也能在界面上切换显示。
+        void LegacyCurves(wm::core::json::Value const& parsed, TrackTimeline& tl)
+        {
+            auto const* dyn = parsed.Find("dynamics");
+            if (dyn == nullptr)
+            {
+                return;
+            }
+            double const interval = tl.curveInterval > 0.0 ? tl.curveInterval : 0.5;
+            std::vector<double> ts;
+            if (auto const* times = dyn->Find("time_seconds"); times != nullptr && times->isArray())
+            {
+                for (auto const& v : times->asArray())
+                {
+                    if (v.isNumber())
+                    {
+                        ts.push_back(v.asNumber());
+                    }
+                }
+            }
+            if (ts.size() < 2)
+            {
+                for (double t = interval * 0.5; t < tl.duration; t += interval)
+                {
+                    ts.push_back(t);
+                }
+            }
+            if (ts.size() < 2)
+            {
+                return;
+            }
+            auto build = [&](char const* key, wchar_t const* id, wchar_t const* unit, wchar_t const* meaning)
+            {
+                auto const* arr = dyn->Find(key);
+                if (arr == nullptr || !arr->isArray() || arr->asArray().size() != ts.size())
+                {
+                    return;
+                }
+                AnalysisCurve c;
+                c.id = id;
+                c.unit = unit;
+                c.meaning = meaning;
+                c.scope = L"full_track";
+                c.times = ts;
+                c.values.reserve(arr->asArray().size());
+                c.valid.assign(arr->asArray().size(), true);
+                for (auto const& v : arr->asArray())
+                {
+                    c.values.push_back(v.isNumber() ? v.asNumber() : 0.0);
+                }
+                tl.curves.push_back(std::move(c));
+            };
+            build("rms_db", L"level_db", L"dBFS", L"短时电平 RMS（dBFS），不是感知响度 LUFS");
+            build("onset_density", L"onset_activity", L"activity_proxy", L"onset 包络积分代理量（旧约定包络），不是起音次数");
+            build("low_band_energy", L"low_band_ratio", L"ratio 0..1", L"20-250 Hz 功率占比；不等于 bass 乐器");
+            build("spectral_brightness", L"spectral_brightness", L"Hz", L"功率加权频率质心");
+            build("arrangement_change", L"spectral_flux", L"normalized 0..1", L"谱流：帧间正变化占比；只说明音色在变");
+        }
     } // namespace
 
     TrackTimeline RecommendService::ParseTimeline(std::wstring_view jsonText, std::wstring filePath,
@@ -338,11 +491,23 @@ namespace wm::app
 
         if (jsonText.empty())
         {
-            // The handshake/HTTP reason is more specific than our guess, so use
-            // it when there is one.
-            tl.note = engineError.empty()
-                ? std::wstring{ L"引擎没有这首歌的分析（文件不在曲库里，或还没分析）。" }
-                : std::wstring{ engineError };
+            // 引擎在跑但库里没有这首（GET /v1/analysis 的 404 detail 是
+            // "file_path not indexed: ..." / "track not found"）：这不是连接
+            // 故障，是「还没分析过」，把引擎的原始报错换成可操作的指引。
+            std::wstring const error{ engineError };
+            if (error.find(L"not indexed") != std::wstring::npos ||
+                error.find(L"track not found") != std::wstring::npos)
+            {
+                tl.note = L"这首歌还没有结构分析数据。点上面「生成分析」，引擎只分析当前这一首（几秒到十几秒）。";
+            }
+            else
+            {
+                // The handshake/HTTP reason is more specific than our guess, so use
+                // it when there is one.
+                tl.note = error.empty()
+                    ? std::wstring{ L"引擎没有这首歌的分析（文件不在曲库里，或还没分析）。" }
+                    : error;
+            }
             return tl;
         }
 
@@ -434,6 +599,33 @@ namespace wm::app
                     }
                 }
             }
+        }
+        // 通用曲线契约：每条自带单位 / 含义 / 有效掩码，画图时按各自尺度归一化，
+        // 不再共用"一个无单位的 0-1"。缺失的曲线不进列表（缺失不是零）。
+        if (auto const* curves = parsed->Find("curves"); curves != nullptr && curves->isArray())
+        {
+            for (auto const& c : curves->asArray())
+            {
+                AnalysisCurve curve;
+                curve.id = TextOf(c.Find("id"), L"");
+                curve.unit = TextOf(c.Find("unit"), L"");
+                curve.meaning = TextOf(c.Find("meaning"), L"");
+                curve.scope = TextOf(c.Find("scope"), L"");
+                if (curve.id.empty() || !ParseCurvePoints(c, curve))
+                {
+                    continue;
+                }
+                tl.curves.push_back(std::move(curve));
+            }
+        }
+        else if (!tl.curveTimes.empty())
+        {
+            LegacyCurves(*parsed, tl);
+        }
+        // 引擎描述层（v5）：确定性模板生成的中文描述，逐句可追溯到测量字段。
+        if (auto const* desc = parsed->Find("description"); desc != nullptr && desc->isObject())
+        {
+            tl.profileText = TextOf(desc->Find("text"), L"");
         }
         if (auto const* segs = parsed->Find("segments");
             tl.analysis.fullTrack && segs != nullptr && segs->isArray())
@@ -637,7 +829,7 @@ namespace wm::app
             // background process.
             if (!m_ready && !wm::app::Settings().RecommendPrewarm())
             {
-                tl.note = L"结构分析要用本地推荐引擎；用过「个性推荐」页后这里会自动出曲线。";
+                tl.note = L"这首歌还没有结构分析数据。点上面「生成分析」，引擎只分析当前这一首（几秒到十几秒）。";
             }
             else
             {
@@ -1636,9 +1828,11 @@ namespace wm::app
         InvalidateCache();
     }
 
-    IAsyncOperation<hstring> RecommendService::AnalyzeFoldersAsync(std::vector<std::wstring> folders)
+    IAsyncOperation<hstring> RecommendService::AnalyzeLibraryAsync(std::vector<std::wstring> trackPaths,
+                                                                   std::vector<std::wstring> folders,
+                                                                   std::function<void(hstring const&)> progress)
     {
-        if (folders.empty())
+        if (trackPaths.empty())
         {
             co_return hstring{ L"本地曲库为空：请先在「发现音乐」添加音乐文件夹" };
         }
@@ -1657,33 +1851,93 @@ namespace wm::app
             ~AnalyzeExit() { stage.store(static_cast<int>(RecommendService::Stage::Ready)); }
         } analyzeExit{ m_stage };
 
-        int totalFound = 0;
+        std::vector<std::wstring> engineTracks;
+        engineTracks.reserve(trackPaths.size());
+        for (auto const& path : trackPaths)
+        {
+            if (EngineSupportedAudio(path))
+            {
+                engineTracks.push_back(path);
+            }
+        }
+        if (engineTracks.empty())
+        {
+            co_return hstring{ L"曲库里没有引擎能分析的 mp3 / wav 文件（flac 等格式留在 w-music 播放，不进引擎）。" };
+        }
+
+        if (progress)
+        {
+            progress(hstring{ L"本地引擎已启动。可分析的音频共 " + std::to_wstring(engineTracks.size()) +
+                              L" 首（引擎只支持 mp3 / wav），现在逐首检查并分析：" });
+        }
+
         int totalIndexed = 0;
         int totalSkipped = 0;
         int totalFailed = 0;
         std::wstring errors;
-        for (auto const& folder : folders)
+        std::size_t const n = engineTracks.size();
+        for (std::size_t i = 0; i < n; ++i)
         {
+            std::wstring const& path = engineTracks[i];
+            std::wstring const name = TrackDisplayName(path);
+
+            // 跳过检查：GET /v1/analysis 是纯读库（没索引过是 404 → 空回答），
+            // 已有当前版本全曲曲线的文件就不花那几十秒重新解码了。
+            auto existing = co_await RequestJsonAsync(hstring{ L"GET" },
+                                                      L"/v1/analysis?file_path=" + EncodeQuery(path), {});
+            auto known = existing.empty() ? std::nullopt : wm::core::json::Parse(Utf8(existing));
+            if (known && HasFullCurve(*known))
+            {
+                ++totalSkipped;
+                if (progress)
+                {
+                    progress(hstring{ L"第 " + std::to_wstring(i + 1) + L" / " + std::to_wstring(n) +
+                                      L" 首《" + name + L"》—— 引擎里已有最新分析，跳过" });
+                }
+                continue;
+            }
+
+            if (progress)
+            {
+                progress(hstring{ L"第 " + std::to_wstring(i + 1) + L" / " + std::to_wstring(n) +
+                                  L" 首《" + name + L"》—— 正在分析：解码音频 → 提取特征（响度曲线、节奏、"
+                                  L"调性、和声、人声、配器）→ 结构分段，一首通常十几秒" });
+            }
             wm::core::json::Value body = wm::core::json::Object{};
-            body["root"] = Utf8(hstring{ folder });
-            body["recursive"] = true;
-            body["workers"] = ScanWorkers;
-            auto text = co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/library/scan",
+            body["file_path"] = Utf8(hstring{ path });
+            auto text = co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/tracks/index",
                                                   wm::core::json::Serialize(body, false));
             auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
-            if (!parsed)
+            if (parsed && parsed->Find("track_id") != nullptr)
             {
+                ++totalIndexed;
+            }
+            else
+            {
+                ++totalFailed;
                 if (!errors.empty())
                 {
                     errors += L"；";
                 }
-                errors += std::wstring{ folder } + L"：" + std::wstring{ m_lastError };
-                continue;
+                errors += L"《" + name + L"》：" + std::wstring{ m_lastError };
             }
-            totalFound += IntOf(parsed->Find("found"));
-            totalIndexed += IntOf(parsed->Find("indexed"));
-            totalSkipped += IntOf(parsed->Find("skipped"));
-            totalFailed += IntOf(parsed->Find("failed"));
+
+            // 分批推进：每分析满一批就歇一小会儿，并把阶段放回 Ready——期间
+            // 推荐流补货、结构卡片取曲线都能插进来用引擎，整库分析不再把
+            // 引擎一口气占满到最后。
+            if ((i + 1) % AnalyzeBatchSize == 0 && i + 1 < n)
+            {
+                if (progress)
+                {
+                    progress(hstring{ L"已完成 " + std::to_wstring(i + 1) + L" / " + std::to_wstring(n) +
+                                      L" 首（本批结束），歇 " +
+                                      std::to_wstring(std::chrono::milliseconds{ AnalyzeBatchPause }.count() / 1000) +
+                                      L" 秒让推荐流 / 结构图用一下引擎，随后继续…" });
+                }
+                m_stage = static_cast<int>(Stage::Ready);
+                co_await resume_after(AnalyzeBatchPause);
+                m_stage = static_cast<int>(Stage::Analyzing);
+            }
         }
 
         if (totalIndexed > 0)
@@ -1691,23 +1945,88 @@ namespace wm::app
             // The engine just learned new tracks: every cached ranking
             // describes the library as it was before this scan.
             InvalidateCache();
+
+            // 结尾一次增量扫描：所有文件此刻都已分析过（逐首阶段写进了引擎的
+            // 库），这一步只核对签名不重新解码，顺便重建推荐侧的 embedding +
+            // FAISS——结构卡片用不到它们，但个性推荐页要用。
+            if (progress)
+            {
+                progress(hstring{ L"逐首分析完成（新增 " + std::to_wstring(totalIndexed) +
+                                  L" / 跳过 " + std::to_wstring(totalSkipped) + L" / 失败 " +
+                                  std::to_wstring(totalFailed) +
+                                  L"），正在重建推荐索引（embedding + FAISS），结构图不依赖这一步…" });
+            }
+            for (auto const& folder : folders)
+            {
+                wm::core::json::Value body = wm::core::json::Object{};
+                body["root"] = Utf8(hstring{ folder });
+                body["recursive"] = true;
+                body["workers"] = ScanWorkers;
+                co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/library/scan",
+                                          wm::core::json::Serialize(body, false));
+            }
         }
 
-        if (totalFound + totalSkipped == 0 && !errors.empty())
-        {
-            co_return hstring{ errors };
-        }
-
-        // Only .mp3/.wav enter the engine, so "found" can legitimately trail
-        // the w-music library size (flac etc. stay w-music-only).
         std::wstring summary = L"曲库分析完成：本次新增 " + std::to_wstring(totalIndexed) +
                                L" 首，跳过已分析 " + std::to_wstring(totalSkipped) +
                                L" 首，失败 " + std::to_wstring(totalFailed) + L" 首";
+        if (totalIndexed == 0 && totalFailed == 0 && totalSkipped > 0)
+        {
+            summary = L"曲库已全部分析过（跳过 " + std::to_wstring(totalSkipped) + L" 首），没有需要新分析的文件";
+        }
         if (!errors.empty())
         {
             summary += L"；" + errors;
         }
         co_return hstring{ summary };
+    }
+
+    IAsyncOperation<hstring> RecommendService::AnalyzeTrackAsync(std::wstring filePath)
+    {
+        if (filePath.empty())
+        {
+            co_return hstring{ L"当前没有在播本地文件，结构分析只支持本地曲目。" };
+        }
+
+        hstring const startError = co_await EnsureStartedAsync();
+        if (!startError.empty())
+        {
+            co_return startError;
+        }
+
+        // 跳过检查：这首在引擎里已经有当前版本的全曲曲线就直接成功，
+        // 别让重复点击把已分析的歌再解码一遍（那要几十秒）。
+        auto existing = co_await RequestJsonAsync(hstring{ L"GET" },
+                                                  L"/v1/analysis?file_path=" + EncodeQuery(filePath), {});
+        auto known = existing.empty() ? std::nullopt : wm::core::json::Parse(Utf8(existing));
+        if (known && HasFullCurve(*known))
+        {
+            co_return hstring{};
+        }
+
+        m_stage = static_cast<int>(Stage::Analyzing);
+        struct AnalyzeExit
+        {
+            std::atomic_int& stage;
+            ~AnalyzeExit() { stage.store(static_cast<int>(RecommendService::Stage::Ready)); }
+        } analyzeExit{ m_stage };
+
+        wm::core::json::Value body = wm::core::json::Object{};
+        body["file_path"] = Utf8(hstring{ filePath });
+        auto text = co_await RequestJsonAsync(hstring{ L"POST" }, L"/v1/tracks/index",
+                                              wm::core::json::Serialize(body, false));
+        auto parsed = text.empty() ? std::nullopt : wm::core::json::Parse(Utf8(text));
+        if (parsed && parsed->Find("track_id") != nullptr)
+        {
+            co_return hstring{};
+        }
+        co_return hstring{ L"《" + TrackDisplayName(filePath) + L"》分析失败：" + std::wstring{ m_lastError } };
+    }
+
+    void RecommendService::ForgetTimeline(std::wstring const& filePath)
+    {
+        std::lock_guard lock{ m_timelineMutex };
+        m_timelines.erase(filePath);
     }
 
     IAsyncOperation<hstring> RecommendService::FeedStateTextAsync()

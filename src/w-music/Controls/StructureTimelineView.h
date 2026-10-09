@@ -28,12 +28,28 @@ namespace wm::app
             double boundaryConfidence = 0.0;
         };
 
+        /// 一条可切换显示的曲线。|values| 是原始测量值（各曲线单位不同），
+        /// 画图时按本曲线自身的 min-max 归一化；|valid| 为假的点不参与统计、
+        /// 也不补零——零可能是真实测量结果。
+        struct Curve
+        {
+            std::wstring id;
+            std::vector<double> times;
+            std::vector<double> values;
+            std::vector<bool> valid;
+        };
+
         void Attach(winrt::Microsoft::UI::Xaml::Controls::Canvas const& canvas);
         /// |times| are the engine's bucket centers in seconds and |curve| the
         /// matching 0..1 loudness. An empty curve paints nothing -- the view
         /// never invents a flat line to look like an answer.
         void SetData(double duration, std::vector<double> const& times,
                      std::vector<double> const& curve, std::vector<Segment> const& segments);
+        /// 多曲线版本：切曲线走 SetActiveCurve，段落与播放头原样保留。
+        void SetCurves(double duration, std::vector<Curve> const& curves,
+                       std::vector<Segment> const& segments);
+        void SetActiveCurve(std::size_t index);
+        std::size_t curveCount() const noexcept { return m_curves.size(); }
         /// Moves the playhead; |seconds| outside the track simply parks it at
         /// the edge.
         void SetPosition(double seconds);
@@ -53,8 +69,8 @@ namespace wm::app
         std::vector<winrt::Microsoft::UI::Xaml::Shapes::Rectangle> m_ticks;
         winrt::Microsoft::UI::Xaml::Shapes::Rectangle m_playhead{ nullptr };
 
-        std::vector<double> m_times;
-        std::vector<double> m_curve;
+        std::vector<Curve> m_curves;
+        std::size_t m_active = 0;
         std::vector<Segment> m_segments;
         double m_duration = 0.0;
         double m_position = 0.0;

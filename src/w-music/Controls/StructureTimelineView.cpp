@@ -173,18 +173,43 @@ namespace wm::app
         m_ticks.clear();
         m_playhead = nullptr;
         m_canvas = nullptr;
+        m_curves.clear();
+        m_active = 0;
+        m_segments.clear();
         m_width = 0.0;
         m_height = 0.0;
     }
 
     void StructureTimelineView::SetData(double duration, std::vector<double> const& times,
-                                       std::vector<double> const& curve,
-                                       std::vector<Segment> const& segments)
+                                        std::vector<double> const& curve,
+                                        std::vector<Segment> const& segments)
+    {
+        // 单曲线便利入口：0..1 响度本来就是归一化好的，逐点有效。
+        Curve level;
+        level.id = L"level";
+        level.times = times;
+        level.values = curve;
+        level.valid.assign(curve.size(), true);
+        SetCurves(duration, { std::move(level) }, segments);
+    }
+
+    void StructureTimelineView::SetCurves(double duration, std::vector<Curve> const& curves,
+                                          std::vector<Segment> const& segments)
     {
         m_duration = std::max(0.0, duration);
-        m_times = times;
-        m_curve = curve;
+        m_curves = curves;
+        m_active = m_curves.empty() ? 0 : std::min(m_active, m_curves.size() - 1);
         m_segments = segments;
+        Relayout();
+    }
+
+    void StructureTimelineView::SetActiveCurve(std::size_t index)
+    {
+        if (index >= m_curves.size() || index == m_active)
+        {
+            return;
+        }
+        m_active = index;
         Relayout();
     }
 
@@ -206,7 +231,7 @@ namespace wm::app
             Relayout();
             return;
         }
-        if (m_duration <= 0.0 || m_curve.empty())
+        if (m_duration <= 0.0 || m_active >= m_curves.size() || m_curves[m_active].values.empty())
         {
             m_playhead.Visibility(Visibility::Collapsed);
             return;
@@ -280,13 +305,62 @@ namespace wm::app
         }
 
         HideAll();
-        if (m_curve.empty() || m_times.size() != m_curve.size() || m_duration <= 0.0)
+        if (m_active >= m_curves.size() || m_duration <= 0.0)
+        {
+            return;
+        }
+        auto const& curve = m_curves[m_active];
+        auto const& vals = curve.values;
+        std::size_t const n = vals.size();
+        if (n == 0 || curve.times.size() != n)
         {
             return;
         }
 
-        const double interval = m_times.size() > 1 ? (m_times[1] - m_times[0]) : (m_duration / m_curve.size());
-        const std::size_t n = m_curve.size();
+        // 显示归一化按本曲线自身的 min-max：各曲线单位不同（dBFS / 次/秒 /
+        // 占比 / Hz），不能画成同一把无单位的 0-1 尺子；真实单位由页面文字说明。
+        double lo = 0.0;
+        double hi = 0.0;
+        bool any = false;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            if (i < curve.valid.size() && !curve.valid[i])
+            {
+                continue;
+            }
+            double const v = vals[i];
+            if (!std::isfinite(v))
+            {
+                continue;
+            }
+            if (!any)
+            {
+                lo = hi = v;
+                any = true;
+            }
+            else
+            {
+                lo = std::min(lo, v);
+                hi = std::max(hi, v);
+            }
+        }
+        if (!any)
+        {
+            return;
+        }
+        double const span = hi - lo;
+        auto norm = [&](double v)
+        {
+            if (!std::isfinite(v) || span < 1e-9)
+            {
+                return 0.5;
+            }
+            return std::clamp((v - lo) / span, 0.0, 1.0);
+        };
+
+        const double interval = curve.times.size() > 1
+            ? (curve.times[1] - curve.times[0])
+            : (m_duration / static_cast<double>(n));
         for (int j = 0; j < static_cast<int>(m_bars.size()); ++j)
         {
             auto const a = static_cast<std::size_t>(n * static_cast<std::size_t>(j) / m_bars.size());
@@ -296,15 +370,30 @@ namespace wm::app
                 continue;
             }
             double sum = 0.0;
+            int count = 0;
             for (std::size_t i = a; i < b; ++i)
             {
-                sum += std::clamp(m_curve[i], 0.0, 1.0);
+                if (i < curve.valid.size() && !curve.valid[i])
+                {
+                    continue;
+                }
+                double const v = vals[i];
+                if (!std::isfinite(v))
+                {
+                    continue;
+                }
+                sum += norm(v);
+                ++count;
             }
-            const double value = sum / static_cast<double>(b - a);
+            if (count == 0)
+            {
+                continue; // 这一段没有可信数据：留空，不画一个假的 0
+            }
+            const double value = sum / static_cast<double>(count);
 
             // 桶心在 (i+0.5)*interval，所以这一段的左右边界是首尾桶心各外推半格。
-            const double left = TimeToX(m_times[a] - interval * 0.5, m_duration, width);
-            const double right = TimeToX(std::min(m_times[b - 1] + interval * 0.5, m_duration), m_duration, width);
+            const double left = TimeToX(curve.times[a] - interval * 0.5, m_duration, width);
+            const double right = TimeToX(std::min(curve.times[b - 1] + interval * 0.5, m_duration), m_duration, width);
             const double barWidth = std::max(1.0, right - left - 1.0);
             const double barHeight = std::max(1.5, value * (height - 6.0));
 
